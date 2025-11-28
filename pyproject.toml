@@ -1,0 +1,21 @@
+# src/services/distributor/pyproject.toml
+
+[project]
+name = "trading-shared"
+version = "0.1.0"
+description = "Consolidated shared clients and utilities for the trading platform."
+
+dependencies = [
+    "asyncpg==0.30.0",
+    "redis==7.1.0",
+    "aiohttp==3.13.2",
+    "orjson==3.11.4",
+    "loguru==0.7.2",    
+    "trading-engine-core @ git+https://github.com/venoajie/trading-engine-core.git@v0.2.0"
+]
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
