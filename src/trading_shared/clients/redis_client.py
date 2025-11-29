@@ -5,7 +5,7 @@ import time
 from collections import deque
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar, Optional
-import socket  
+import socket
 import orjson
 import redis.asyncio as aioredis
 from loguru import logger as log
@@ -14,11 +14,13 @@ from ..config.models import RedisSettings
 
 T = TypeVar("T")
 
+
 class CustomRedisClient:
     """A resilient client wrapper for the redis-py async client."""
+
     _OHLC_WORK_QUEUE_KEY = "queue:ohlc_work"
     _OHLC_FAILED_QUEUE_KEY = "dlq:ohlc_work"
-    
+
     def __init__(self, settings: RedisSettings):
         self._settings = settings
         self._pool: Optional[aioredis.ConnectionPool] = None
@@ -27,7 +29,7 @@ class CustomRedisClient:
         self._reconnect_attempts = 0
         self._write_sem = asyncio.Semaphore(4)
         self._lock = asyncio.Lock()
-        
+
     async def get_pool(self) -> aioredis.Redis:
         async with self._lock:
             if self.pool:
@@ -92,7 +94,6 @@ class CustomRedisClient:
                 log.info("Redis connection pool closed.")
             except Exception as e:
                 log.error(f"Error closing Redis pool: {e}")
-
 
     async def _execute_resiliently(
         self,
@@ -493,33 +494,50 @@ class CustomRedisClient:
         except ConnectionError:
             log.error("Failed to get OHLC work queue size due to connection error.")
             return 0
-            
+
     async def get(self, key: str) -> bytes | None:
-        """ Fetches a value from Redis by key using the resilient executor. """
+        """Fetches a value from Redis by key using the resilient executor."""
+
         async def command(conn: aioredis.Redis) -> bytes | None:
             return await conn.get(key)
+
         return await self._execute_resiliently(command, f"GET {key}")
 
     async def set(self, key: str, value: str, ex: int | None = None):
-        """ Sets a value in Redis with an optional expiration using the resilient executor. """
+        """Sets a value in Redis with an optional expiration using the resilient executor."""
+
         async def command(conn: aioredis.Redis):
             await conn.set(key, value, ex=ex)
+
         await self._execute_resiliently(command, f"SET {key}")
 
     async def hset(self, name: str, key: str, value: Any):
-        """ Sets a field in a hash using the resilient executor. """
+        """Sets a field in a hash using the resilient executor."""
+
         async def command(conn: aioredis.Redis):
             await conn.hset(name, key, value)
+
         await self._execute_resiliently(command, f"HSET {name}")
-        
-    async def xadd(self, name: str, fields: dict, maxlen: int | None = None, approximate: bool = True):
-        """ Adds an entry to a stream using the resilient executor. """
+
+    async def xadd(
+        self,
+        name: str,
+        fields: dict,
+        maxlen: int | None = None,
+        approximate: bool = True,
+    ):
+        """Adds an entry to a stream using the resilient executor."""
         # Encode fields for redis-py
         encoded_fields = {
-            k.encode('utf-8') if isinstance(k, str) else k: 
-            v.encode('utf-8') if isinstance(v, str) else v
+            k.encode("utf-8") if isinstance(k, str) else k: v.encode("utf-8")
+            if isinstance(v, str)
+            else v
             for k, v in fields.items()
         }
+
         async def command(conn: aioredis.Redis):
-            await conn.xadd(name, encoded_fields, maxlen=maxlen, approximate=approximate)
+            await conn.xadd(
+                name, encoded_fields, maxlen=maxlen, approximate=approximate
+            )
+
         await self._execute_resiliently(command, f"XADD {name}")

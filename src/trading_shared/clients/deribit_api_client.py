@@ -1,6 +1,6 @@
-
 import aiohttp
-from ..config.models import ExchangeSettings # Import from within the library
+from ..config.models import ExchangeSettings  # Import from within the library
+
 
 class DeribitApiClient:
     """An API client for the Deribit exchange."""

@@ -1,10 +1,10 @@
-
 # Previously: shared-exchange-clients/public/deribit_client.py
 
 import aiohttp
 from ...config.models import ExchangeSettings
 
-class DeribitPublicClient: # Renamed for clarity
+
+class DeribitPublicClient:  # Renamed for clarity
     """
     An API client for public, non-authenticated Deribit endpoints.
     """

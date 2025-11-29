@@ -7,21 +7,23 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 import orjson
 from loguru import logger as log
-from ..config.models import PostgresSettings 
+from ..config.models import PostgresSettings
 
 # Type variable for the resilient executor's return type
 T = TypeVar("T")
 
+
 class PostgresClient:
-    """A resilient client for interacting with PostgreSQL via asyncpg."""   
+    """A resilient client for interacting with PostgreSQL via asyncpg."""
+
     _pool: asyncpg.Pool | None = None
     _lock = asyncio.Lock()
 
     def __init__(self, settings: PostgresSettings | None = None):
         self.postgres_settings = settings
         self.dsn = self.postgres_settings.dsn if self.postgres_settings else None
-        self._pool: Optional[asyncpg.Pool] = None        
-        
+        self._pool: Optional[asyncpg.Pool] = None
+
     async def _execute_resiliently(
         self,
         command_func: Callable[[asyncpg.Connection], Awaitable[T]],
@@ -118,7 +120,6 @@ class PostgresClient:
         records = [self._prepare_ohlc_record(c) for c in candles]
 
         async def command(conn: asyncpg.Connection):
-            
             try:
                 async with conn.transaction():
                     await conn.execute(
