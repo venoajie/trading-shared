@@ -23,8 +23,8 @@ class BinanceWsClient(AbstractWsClient):
     def __init__(
         self,
         market_definition: MarketDefinition,
-        redis_client: CustomRedisClient,
         postgres_client: PostgresClient,
+        redis_client: CustomRedisClient,
         settings: ExchangeSettings,
     ):
         super().__init__(market_definition, redis_client, postgres_client)
