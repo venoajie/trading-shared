@@ -1,7 +1,7 @@
 # src\trading_shared\config\models.py
 
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 class RedisSettings(BaseModel):
@@ -17,6 +17,11 @@ class PostgresSettings(BaseModel):
     port: int
     db: str
 
+    @computed_field
+    @property
+    def dsn(self) -> str:
+        """Computes the DSN string for asyncpg."""
+        return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.db}"
 
 class ExchangeSettings(BaseModel):
     # API keys are now optional, allowing this model to be used
