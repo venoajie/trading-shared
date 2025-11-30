@@ -10,3 +10,4 @@ class DeribitApiClient:
         self._settings = settings
         self._session: Optional[aiohttp.ClientSession] = None
         # ... rest of implementation (unchanged) ...
+
