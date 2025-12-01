@@ -4,7 +4,7 @@ from typing import Dict, Optional, Any
 from loguru import logger as log
 
 # Use relative imports or shared library imports
-from ..exchange.trading.deribit import DeribitTradingClient
+from ..exchange.trading.deribit.deribit import DeribitTradingClient
 from .models import MarginCalculationResult
 
 
