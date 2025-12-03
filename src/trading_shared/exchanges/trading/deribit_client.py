@@ -1,14 +1,19 @@
-# src\trading_shared\exchange\trading\deribit\deribit.py
+# src\trading_shared\exchanges\trading\deribit_client.py
 
+# --- Built Ins  ---
 import asyncio
-import orjson
-from loguru import logger as log
 from typing import Dict, Any, Optional
-import aiohttp
 import time
 from functools import wraps
-from ....config.models import ExchangeSettings
-from .constants import ApiMethods
+
+# --- Installed  ---
+import aiohttp
+from loguru import logger as log
+import orjson
+
+# --- Local Application Imports ---
+from ...config.models import ExchangeSettings
+from .deribit_constants import ApiMethods
 
 
 class TokenExpiredError(Exception):

@@ -1,8 +1,9 @@
 # src\trading_shared\utils\labelling.py
 
+# --- Built Ins  ---
 import time
-import uuid
 from typing import Optional, Tuple
+import uuid
 
 
 def generate_strategy_label(

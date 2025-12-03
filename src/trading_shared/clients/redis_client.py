@@ -1,16 +1,21 @@
 
 # src\trading_shared\clients\redis_client.py
 
+# --- Built Ins  ---
 import asyncio
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar, Optional
 import socket
+
+# --- Installed  ---
 import orjson
 import redis.asyncio as aioredis
 from loguru import logger as log
 from redis import exceptions as redis_exceptions
+
+# --- Local Application Imports ---
 from ..config.models import RedisSettings
 
 T = TypeVar("T")

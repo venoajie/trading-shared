@@ -1,12 +1,17 @@
 # src\trading_shared\clients\postgres_client.py
 
-import asyncpg
-from typing import Any, TypeVar, Optional
+# --- Installed  ---
 import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
-import orjson
+from typing import Any, TypeVar, Optional
+
+# --- Installed  ---
+import asyncpg
 from loguru import logger as log
+import orjson
+
+# --- Local Application Imports ---
 from ..config.models import PostgresSettings
 
 # Type variable for the resilient executor's return type

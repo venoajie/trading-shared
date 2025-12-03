@@ -1,6 +1,11 @@
-import aiohttp
+# --- Built Ins  ---
 from typing import List, Dict, Any
+
+# --- Installed  ---
+import aiohttp
 from loguru import logger as log
+
+# --- Local Application Imports ---
 from ...config.models import ExchangeSettings
 
 

@@ -1,8 +1,10 @@
 # Previously: shared-exchange-clients/public/deribit_client.py
 
+# --- Installed  ---
 import aiohttp
-from ...config.models import ExchangeSettings
 
+# --- Local Application Imports ---
+from ...config.models import ExchangeSettings
 
 class DeribitPublicClient:  # Renamed for clarity
     """

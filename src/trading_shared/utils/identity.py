@@ -1,9 +1,12 @@
 # src\trading_shared\utils\identity.py
 
-import uuid
-import oracledb
-from loguru import logger as log
+# --- Built Ins  ---
 import asyncio
+import uuid
+
+# --- Installed  ---
+from loguru import logger as log
+import oracledb
 
 # Namespace for Trading App Accounts - DO NOT CHANGE
 TRADING_IDENTITY_NAMESPACE = uuid.UUID("951e7376-a07e-52ad-9477-030913972236")
