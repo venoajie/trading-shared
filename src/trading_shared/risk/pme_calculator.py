@@ -7,7 +7,7 @@ from typing import Dict, Optional, Any
 from loguru import logger as log
 
 # --- Local Application Imports ---
-from ..exchanges.trading.deribit.deribit import DeribitTradingClient
+from ..exchanges.trading.deribit_client import DeribitTradingClient
 from .models import MarginCalculationResult
 
 
