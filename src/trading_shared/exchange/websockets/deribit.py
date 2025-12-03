@@ -1,21 +1,26 @@
 # src\trading_shared\exchange\websockets\deribit.py
 
+# --- Built Ins  ---
 import asyncio
+import json
+import random
+import time
+from typing import AsyncGenerator, List, Optional
+
+# --- Installed  ---
 from loguru import logger as log
 import orjson
-import json
-import time
-import random
-from typing import AsyncGenerator, List, Optional
 import websockets
 
-from .base import AbstractWsClient
+# --- Local Application Imports ---
 from ...clients.redis_client import CustomRedisClient
 from ...clients.postgres_client import PostgresClient
-from ...config.models import ExchangeSettings, StreamMessage
+from ...config.models import ExchangeSettings # Configuration model
 from ...trading.deribit.constants import WebsocketParameters
-from trading_engine_core.models import MarketDefinition  # A contract for market info
+from .base import AbstractWsClient
 
+# --- Shared Library Imports  ---
+from trading_engine_core.models import StreamMessage, MarketDefinition
 
 class DeribitWsClient(AbstractWsClient):
     def __init__(
@@ -29,7 +34,6 @@ class DeribitWsClient(AbstractWsClient):
         self.redis = redis_client
         self.market_def = market_def
         self.settings = settings
-        # ... rest of implementation ...
 
         super().__init__(market_definition, redis_client, postgres_client)
         self.ws_connection_url = self.market_def.ws_base_url

@@ -1,16 +1,22 @@
 ## src/services/receiver/exchange_clients/binance_ws_client.py
 
+# --- Built Ins  ---
 import asyncio
+from typing import AsyncGenerator, Set
+
+# --- Installed  ---
+from loguru import logger as log
 import orjson
 import websockets
-from typing import AsyncGenerator, Set
-from loguru import logger as log
 
+# --- Local Application Imports ---
 from .base import AbstractWsClient
 from ...clients.postgres_client import PostgresClient
 from ...clients.redis_client import CustomRedisClient
-from ...config.models import ExchangeSettings, StreamMessage
-from trading_engine_core.models import MarketDefinition  # A contract for market info
+from ...config.models import ExchangeSettings
+
+# --- Shared Library Imports  ---
+from trading_engine_core.models import StreamMessage, MarketDefinition
 
 
 class BinanceWsClient(AbstractWsClient):
@@ -184,21 +190,11 @@ class BinanceWsClient(AbstractWsClient):
                 self._ws = None
                 await asyncio.sleep(15)
 
-    async def connect(self) -> AsyncGenerator[StreamMessage, None]:
-        """Orchestrates the client's concurrent tasks."""
+    async def process_messages(self) -> AsyncGenerator[StreamMessage, None]:
+        """        
+        Main entry point. Connects to the WebSocket and starts concurrent listener tasks.
+        """
         self._is_running.set()
-
-        initial_symbols = [
-            item
-            for item in (settings.public_symbols or [])
-            if item.get("market_type") == self.market_def.market_type
-        ]
-
-        for item in initial_symbols:
-            symbol = item.get("symbol")
-            if symbol:
-                stream_name = f"{symbol.lower()}@aggTrade"
-                self._subscriptions.add(stream_name)
 
         log.info(
             f"[{self.exchange_name}][{self.market_def.market_id}] Initial subscriptions set: {self._subscriptions}"
