@@ -47,7 +47,7 @@ class DeribitWsClient(AbstractWsClient):
         data: dict,
     ):
         """Use standard json for Deribit compatibility"""
-        if self.websocket_client and not self.websocket_client.closed:
+        if self.websocket_client:
             await self.websocket_client.send(json.dumps(data))
             
     async def _auth(self) -> bool:
@@ -297,6 +297,10 @@ class DeribitWsClient(AbstractWsClient):
         """Gracefully shuts down the websocket client."""
         log.info(f"[{self.exchange_name}] Closing client for '{self.market_def.market_id}'...")
         self._is_running.clear()
-        if self.websocket_client and not self.websocket_client.closed:
-            await self.websocket_client.close()
+        if self.websocket_client:
+            # The close() method handles already-closed connections gracefully.
+            try:
+                await self.websocket_client.close()
+            except websockets.exceptions.ConnectionClosed:
+                pass # Suppress error if already closed
         log.info(f"[{self.exchange_name}] Client for '{self.market_def.market_id}' closed.")
