@@ -485,12 +485,19 @@ class CustomRedisClient:
 
         return await self._execute_resiliently(command, f"GET {key}")
 
+    async def publish(self, channel: str, message: str | bytes):
+        """Publishes a message to a channel."""
+        async def command(conn: aioredis.Redis):
+            return await conn.publish(channel, message)
+
+        await self._execute_resiliently(command, f"PUBLISH {channel}")
+
     async def set(self, key: str, value: str, ex: int | None = None):
         async def command(conn: aioredis.Redis):
             await conn.set(key, value, ex=ex)
 
         await self._execute_resiliently(command, f"SET {key}")
-
+        
     async def hset(self, name: str, key: str, value: Any):
         async def command(conn: aioredis.Redis):
             await conn.hset(name, key, value)
