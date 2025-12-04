@@ -118,7 +118,7 @@ class BinanceWsClient(AbstractWsClient):
                 f"[{self.exchange_name}] No initial streams to subscribe to for market '{self.market_def.market_id}'. Client will be idle until commanded."
             )
             await self._is_running.wait()
-            return
+            # The 'return' statement that was here has been removed.
 
         url = f"{self.ws_connection_url}?streams={stream_names}"
 

@@ -41,6 +41,8 @@ class DeribitWsClient(AbstractWsClient):
         self.client_id = self.settings.client_id
         self.client_secret = self.settings.client_secret
         self.websocket_client: Optional[websockets.WebSocketClientProtocol] = None
+        self.instrument_names: List[str] = []
+
         
     async def _send_json(
         self,
