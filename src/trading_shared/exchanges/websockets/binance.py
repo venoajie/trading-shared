@@ -1,4 +1,4 @@
-## src/services/receiver/exchange_clients/binance_ws_client.py
+# src\trading_shared\exchanges\websockets\binance.py
 
 # --- Built Ins  ---
 import asyncio
@@ -22,8 +22,7 @@ from trading_engine_core.models import StreamMessage, MarketDefinition
 class BinanceWsClient(AbstractWsClient):
     """
     A dynamic, controllable WebSocket client for Binance that manages subscriptions on-the-fly
-    via a Redis control channel. This implementation uses the native `websockets` library
-    and does not depend on `ccxt`.
+    via a Redis control channel. This implementation correctly implements the AbstractWsClient interface.
     """
 
     def __init__(
@@ -76,16 +75,17 @@ class BinanceWsClient(AbstractWsClient):
                     continue
 
                 log.info(f"Received command on control channel: {message['data']}")
-                command = orjson.loads(message["data"])
+                command = orjson.loads(message['data'])
                 action = command.get("action")
+                # Correctly handle symbol format which is now a simple list of strings
                 symbols_to_modify = command.get("symbols", [])
 
                 if not symbols_to_modify:
                     continue
-
-                streams_to_modify = [
-                    f"{item['symbol'].lower()}@aggTrade" for item in symbols_to_modify
-                ]
+                
+                # The symbols from initial_subscriptions are already in the correct format (e.g., "btcusdt@trade")
+                # A more robust solution would be to define the stream type in config. Assuming 'aggTrade' for now.
+                streams_to_modify = [f"{symbol.lower().split('@')[0]}@aggTrade" for symbol in symbols_to_modify]
 
                 if action == "subscribe":
                     new_subs = [
@@ -107,9 +107,11 @@ class BinanceWsClient(AbstractWsClient):
                 log.error(f"Error in control channel listener: {e}", exc_info=True)
                 await asyncio.sleep(5)
 
-    async def _message_loop(self) -> AsyncGenerator[StreamMessage, None]:
-        """The main loop for connecting to the WebSocket and processing messages."""
-
+    async def connect(self) -> AsyncGenerator[StreamMessage, None]:
+        """
+        Main message generator loop. Connects to the WebSocket and yields messages.
+        This method now correctly implements the 'connect' abstract method.
+        """
         stream_names = "/".join(self._subscriptions)
         if not stream_names:
             log.warning(
@@ -118,95 +120,111 @@ class BinanceWsClient(AbstractWsClient):
             await self._is_running.wait()
             return
 
-        # The base URL from config is `.../stream`->We only append `?streams=...`
         url = f"{self.ws_connection_url}?streams={stream_names}"
+
+        try:
+            log.info(f"[{self.exchange_name}] Connecting to: {url}")
+            async with websockets.connect(
+                url, ping_interval=20, ping_timeout=60
+            ) as ws:
+                self._ws = ws
+                log.success(
+                    f"[{self.exchange_name}] WebSocket connection established for market '{self.market_def.market_id}'."
+                )
+
+                async for message in ws:
+                    try:
+                        payload = orjson.loads(message)
+                        if "data" not in payload or "stream" not in payload:
+                            continue
+
+                        trade_data = payload["data"]
+                        stream_name = payload["stream"]
+                        symbol = stream_name.split("@")[0].upper()
+                        
+                        # Use market_type from the MarketDefinition object
+                        market_type_str = self.market_def.market_type.value
+
+                        yield StreamMessage(
+                            exchange=self.exchange_name,
+                            channel=f"aggTrade.{symbol}.{market_type_str}",
+                            timestamp=trade_data.get("T"),
+                            data={
+                                "symbol": symbol,
+                                "market_type": market_type_str,
+                                "trade_id": trade_data.get("a"),
+                                "price": float(trade_data.get("p")),
+                                "quantity": float(trade_data.get("q")),
+                                "is_buyer_maker": trade_data.get("m"),
+                                "was_best_price_match": trade_data.get("M"),
+                            },
+                        )
+                    except (orjson.JSONDecodeError, TypeError, KeyError) as e:
+                        log.error(
+                            f"[{self.exchange_name}] Error processing message: {e}. Payload: {message}",
+                            exc_info=True,
+                        )
+        finally:
+            self._ws = None # Ensure websocket object is cleared on exit
+            log.warning(f"[{self.exchange_name}] Disconnected from {url}.")
+
+
+    async def process_messages(self):
+        """
+        Manages the service lifecycle and reconnect loop.
+        This method now correctly implements the 'process_messages' abstract method.
+        """
+        self._is_running.set()
+        log.info(f"[{self.exchange_name}] Starting message processor for '{self.market_def.market_id}'.")
+        
+        listener_task = asyncio.create_task(self._control_channel_listener())
+        reconnect_attempts = 0
 
         while self._is_running.is_set():
             try:
-                log.info(f"[{self.exchange_name}] Connecting to: {url}")
-                async with websockets.connect(
-                    url, ping_interval=20, ping_timeout=60
-                ) as ws:
-                    self._ws = ws
-                    log.success(
-                        f"[{self.exchange_name}] WebSocket connection established for market '{self.market_def.market_id}'."
+                batch = []
+                message_generator = self.connect()
+                async for message in message_generator:
+                    if not self._is_running.is_set(): break
+                    reconnect_attempts = 0  # Reset on successful message
+                    
+                    # Update Redis ticker snapshot
+                    redis_key = f"ticker:{message.data['symbol']}"
+                    await self.redis_client.hset(
+                        redis_key, "payload", orjson.dumps(message.data)
                     )
 
-                    # Get Redis pool once per successful connection
-                    pool = await self.redis_client.get_pool()
-
-                    async for message in ws:
-                        try:
-                            payload = orjson.loads(message)
-                            if "data" not in payload or "stream" not in payload:
-                                continue
-
-                            trade_data = payload["data"]
-                            stream_name = payload["stream"]
-                            symbol = stream_name.split("@")[0].upper()
-                            market_type = self.market_def.market_type
-
-                            # Update the Redis Hash for low-latency lookups (Snapshot)
-                            redis_key = f"ticker:{symbol}"
-
-                            # Use the pre-fetched pool object
-                            await pool.hset(
-                                redis_key, "payload", orjson.dumps(trade_data)
-                            )
-
-                            yield StreamMessage(
-                                exchange=self.exchange_name,
-                                channel=f"aggTrade.{symbol}.{market_type}",
-                                timestamp=trade_data.get("T"),
-                                data={
-                                    "symbol": symbol,
-                                    "market_type": market_type,
-                                    "trade_id": trade_data.get("a"),
-                                    "price": float(trade_data.get("p")),
-                                    "quantity": float(trade_data.get("q")),
-                                    "is_buyer_maker": trade_data.get("m"),
-                                    "was_best_price_match": trade_data.get("M"),
-                                },
-                            )
-                        except (orjson.JSONDecodeError, TypeError, KeyError) as e:
-                            log.error(
-                                f"[{self.exchange_name}] Error processing message: {e}. Payload: {message}",
-                                exc_info=True,
-                            )
-
-            except (websockets.ConnectionClosed, ConnectionError) as e:
-                log.warning(
-                    f"[{self.exchange_name}] Connection closed for market '{self.market_def.market_id}': {e}. Reconnecting in 5s..."
-                )
-                self._ws = None
-                await asyncio.sleep(5)
+                    # Append to batch for stream
+                    batch.append(message.model_dump(exclude_none=True))
+                    if len(batch) >= 100:
+                        await self.redis_client.xadd_bulk(self.stream_name, batch)
+                        log.debug(f"[{self.exchange_name}] Flushed batch of {len(batch)} messages to Redis.")
+                        batch.clear()
+            
+            except asyncio.CancelledError:
+                break
             except Exception as e:
-                log.error(
-                    f"[{self.exchange_name}] Unexpected error in connect loop for market '{self.market_def.market_id}': {e}. Reconnecting in 15s.",
-                    exc_info=True,
-                )
-                self._ws = None
-                await asyncio.sleep(15)
+                log.error(f"[{self.exchange_name}] Unhandled error in processor for '{self.market_def.market_id}': {e}", exc_info=True)
+            
+            finally:
+                if self._is_running.is_set():
+                    reconnect_attempts += 1
+                    delay = min(2**reconnect_attempts, 60)
+                    log.info(f"[{self.exchange_name}] Message stream for '{self.market_def.market_id}' ended. Reconnecting in {delay}s...")
+                    await asyncio.sleep(delay)
+        
+        listener_task.cancel()
+        await asyncio.gather(listener_task, return_exceptions=True)
+        log.info(f"[{self.exchange_name}] Message processor for '{self.market_def.market_id}' shut down.")
 
-    async def process_messages(self) -> AsyncGenerator[StreamMessage, None]:
+    async def close(self):
         """
-        Main entry point. Connects to the WebSocket and starts concurrent listener tasks.
+        Gracefully shuts down the websocket client.
+        This method now correctly implements the 'close' abstract method.
         """
-        self._is_running.set()
 
-        log.info(
-            f"[{self.exchange_name}][{self.market_def.market_id}] Initial subscriptions set: {self._subscriptions}"
-        )
-
-        listener_task = asyncio.create_task(self._control_channel_listener())
-
-        try:
-            async for message in self._message_loop():
-                yield message
-        finally:
-            self._is_running.clear()
-            listener_task.cancel()
-            await asyncio.gather(listener_task, return_exceptions=True)
-            log.info(
-                f"[{self.exchange_name}][{self.market_def.market_id}] Client tasks shut down."
-            )
+        log.info(f"[{self.exchange_name}] Closing client for '{self.market_def.market_id}'...")
+        self._is_running.clear()
+        if self._ws and self._ws.open:
+            await self._ws.close()
+        log.info(f"[{self.exchange_name}] Client for '{self.market_def.market_id}' closed.")
