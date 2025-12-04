@@ -1,4 +1,4 @@
-# src\trading_shared\exchange\websockets\deribit.py
+# src/trading_shared/exchanges/websockets/deribit.py
 
 # --- Built Ins  ---
 import asyncio
@@ -15,15 +15,12 @@ import websockets
 # --- Local Application Imports ---
 from ...clients.redis_client import CustomRedisClient
 from ...clients.postgres_client import PostgresClient
-from ...config.models import ExchangeSettings  # Configuration model
-
-# from ..trading.deribit_constants import WebsocketParameters
+from ...config.models import ExchangeSettings
 from ...exchanges.trading.deribit_constants import WebsocketParameters
 from .base import AbstractWsClient
 
 # --- Shared Library Imports  ---
 from trading_engine_core.models import StreamMessage, MarketDefinition
-
 
 class DeribitWsClient(AbstractWsClient):
     def __init__(
@@ -31,27 +28,20 @@ class DeribitWsClient(AbstractWsClient):
         market_definition: MarketDefinition,
         postgres_client: PostgresClient,
         redis_client: CustomRedisClient,
-        market_def: MarketDefinition,
         settings: ExchangeSettings,
     ):
-        self.redis = redis_client
-        self.market_def = market_def
-        self.settings = settings
-
         super().__init__(market_definition, redis_client, postgres_client)
+        self.settings = settings
+        self._is_running = asyncio.Event()
         self.ws_connection_url = self.market_def.ws_base_url
         if not self.ws_connection_url:
-            raise ValueError("Deribit ws_url not configured.")
-
-        self.client_id = settings.exchanges["deribit"].client_id
-        self.client_secret = settings.exchanges["deribit"].client_secret
+            raise ValueError("Deribit ws_base_url not configured in MarketDefinition.")
+        if not self.settings.client_id or not self.settings.client_secret:
+            raise ValueError("Deribit client_id and client_secret must be configured.")
+        self.client_id = self.settings.client_id
+        self.client_secret = self.settings.client_secret
         self.websocket_client: Optional[websockets.WebSocketClientProtocol] = None
-        self.last_message_time = 0.0
-        self.reconnect_attempts = 0
-        self.monitor_task: Optional[asyncio.Task] = None
-        self.redis_pool = None
-        self.instrument_names: List[str] = []
-
+        
     async def _send_json(
         self,
         data: dict,
@@ -62,7 +52,7 @@ class DeribitWsClient(AbstractWsClient):
 
     async def _auth(self) -> bool:
         """
-        [REFACTORED] Authenticates and waits specifically for the auth response,
+        Authenticates and waits specifically for the auth response,
         ignoring other messages. This prevents race conditions.
         """
         AUTH_ID = 9929
@@ -226,101 +216,87 @@ class DeribitWsClient(AbstractWsClient):
         return False
 
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
-        while True:
+        """
+        Manages a single connection lifecycle. Connects, authenticates,
+        subscribes, and then yields messages. Exits upon disconnection or error.
+        This method now correctly implements the AsyncGenerator contract.
+        """
+        async with websockets.connect(self.ws_connection_url, ping_interval=None) as ws:
+            self.websocket_client = ws
+            log.info(f"[{self.exchange_name}] WebSocket connection established for '{self.market_def.market_id}'.")
+
+            # Authenticate and subscribe for this connection
+            if not await self._auth():
+                log.error("Authentication failed, closing this connection attempt.")
+                return # Exits the generator
+            await self._subscribe()
+
+            # Yield messages from this connection
+            async for message in ws:
+                try:
+                    data = orjson.loads(message)
+                    if not isinstance(data, dict): continue
+                    if self._handle_control_message(data): continue
+
+                    params = data.get("params")
+                    if isinstance(params, dict) and "channel" in params and "data" in params:
+                        yield StreamMessage(
+                            exchange=self.exchange_name,
+                            channel=params["channel"],
+                            timestamp=int(time.time() * 1000),
+                            data=params["data"],
+                        )
+                except orjson.JSONDecodeError:
+                    log.error(f"Invalid JSON received: {message[:100]}...")
+                except Exception as e:
+                    log.error(f"Error processing message: {e}", exc_info=True)
+
+    async def process_messages(self):
+        """
+        Manages the service lifecycle. Contains the infinite reconnect loop.
+        It calls connect() to get a message generator and iterates over it.
+        If the generator exits, the loop retries the connection.
+        """
+        self._is_running.set()
+        reconnect_attempts = 0
+        log.info(f"[{self.exchange_name}] Starting message processor for '{self.market_def.market_id}'.")
+
+        while self._is_running.is_set():
             try:
-                delay = min(2**self.reconnect_attempts, 30) + random.random()
-                if self.reconnect_attempts > 0:
-                    log.info(f"[{self.exchange_name}] Reconnecting in {delay:.1f}s...")
+                batch = []
+                # Get the generator from a new connection attempt
+                message_generator = self.connect()
+                async for message in message_generator:
+                    if not self._is_running.is_set(): break
+                    reconnect_attempts = 0 # Reset on successful message
+                    batch.append(message.model_dump(exclude_none=True))
+                    if len(batch) >= 100:
+                        await self.redis_client.xadd_bulk(self.stream_name, batch)
+                        log.debug(f"[{self.exchange_name}] Flushed batch of {len(batch)} messages to Redis.")
+                        batch.clear()
+
+            except asyncio.CancelledError:
+                break # Exit loop cleanly on cancellation
+            except Exception as e:
+                log.error(f"[{self.exchange_name}] Unhandled error in processor for '{self.market_def.market_id}': {e}", exc_info=True)
+
+            finally:
+                # This block runs on any exit from the `try` block (clean or error)
+                if self.websocket_client:
+                    await self.websocket_client.close()
+                    self.websocket_client = None
+                if self._is_running.is_set():
+                    reconnect_attempts += 1
+                    delay = min(2**reconnect_attempts, 60) + random.random()
+                    log.info(f"[{self.exchange_name}] Message stream for '{self.market_def.market_id}' ended. Reconnecting in {delay:.1f}s...")
                     await asyncio.sleep(delay)
 
-                async with websockets.connect(
-                    self.ws_connection_url, ping_interval=None
-                ) as ws:
-                    self.websocket_client = ws
-                    self.reconnect_attempts = 0
-                    self.last_message_time = 0.0
-                    log.info(f"[{self.exchange_name}] WebSocket connection established")
+        log.info(f"[{self.exchange_name}] Message processor for '{self.market_def.market_id}' shut down.")
 
-                    self.monitor_task = asyncio.create_task(self._monitor_connection())
-
-                    if not self.redis_pool:
-                        self.redis_pool = await self.redis_client.get_pool()
-
-                    # Send heartbeat setup but don't wait for response here.
-                    await self._send_json(
-                        {
-                            "jsonrpc": "2.0",
-                            "id": 0,
-                            "method": "public/set_heartbeat",
-                            "params": {"interval": 30},
-                        }
-                    )
-
-                    # Authenticate robustly
-                    if not await self._auth():
-                        log.error("Authentication failed, will retry connection.")
-                        continue
-
-                    # Subscribe and start processing
-                    await self._subscribe()
-                    self.last_message_time = time.time()
-
-                    async for message in ws:
-                        self.last_message_time = time.time()
-                        try:
-                            data = orjson.loads(message)
-
-                            if not isinstance(data, dict):
-                                log.debug(f"Received non-dictionary message: {data}")
-                                continue
-
-                            if self._handle_control_message(data):
-                                continue
-
-                            params = data.get("params")
-                            if (
-                                isinstance(params, dict)
-                                and "channel" in params
-                                and "data" in params
-                            ):
-                                channel = params["channel"]
-                                payload = params["data"]
-
-                                if "incremental_ticker" in channel:
-                                    instrument_name = channel.split(".")[1]
-                                    redis_key = f"ticker:{instrument_name}"
-                                    await self.redis_pool.hset(
-                                        redis_key, "payload", orjson.dumps(payload)
-                                    )
-
-                                yield StreamMessage(
-                                    exchange=self.exchange_name,
-                                    channel=channel,
-                                    timestamp=int(time.time() * 1000),
-                                    data=payload,
-                                )
-                            else:
-                                log.warning(f"Unhandled data message: {data}")
-
-                        except orjson.JSONDecodeError:
-                            log.error(f"Invalid JSON received: {message[:100]}...")
-                        except Exception as e:
-                            log.error(
-                                f"Error processing message: {e} - Payload: {message[:200]}",
-                                exc_info=True,
-                            )
-
-            except (websockets.ConnectionClosed, ConnectionError) as e:
-                log.warning(f"Connection closed: {e}")
-                self.reconnect_attempts += 1
-            except Exception as e:
-                log.error(f"Unexpected error in connect loop: {e}", exc_info=True)
-                self.reconnect_attempts += 1
-            finally:
-                if self.monitor_task and not self.monitor_task.done():
-                    self.monitor_task.cancel()
-                    try:
-                        await self.monitor_task
-                    except asyncio.CancelledError:
-                        pass
-                self.monitor_task = None
+    async def close(self):
+        """Gracefully shuts down the websocket client."""
+        log.info(f"[{self.exchange_name}] Closing client for '{self.market_def.market_id}'...")
+        self._is_running.clear()
+        if self.websocket_client and self.websocket_client.open:
+            await self.websocket_client.close()
+        log.info(f"[{self.exchange_name}] Client for '{self.market_def.market_id}' closed.")
