@@ -25,3 +25,11 @@ class ApiMethods:
 class AccountId:
     DERIBIT_MAIN = "deribit-148510"
 
+
+class WebsocketParameters:
+    RECONNECT_BASE_DELAY = 5
+    MAX_RECONNECT_DELAY = 3600
+    MAINTENANCE_THRESHOLD = 300
+    HEARTBEAT_INTERVAL = 30
+    WEBSOCKET_TIMEOUT = 300
+
