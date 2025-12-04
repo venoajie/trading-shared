@@ -6,6 +6,7 @@ import aiohttp
 # --- Local Application Imports ---
 from ...config.models import ExchangeSettings
 
+
 class DeribitPublicClient:  # Renamed for clarity
     """
     An API client for public, non-authenticated Deribit endpoints.

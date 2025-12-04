@@ -4,7 +4,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any, TypeVar, Optional
+from typing import Any, List, TypeVar, Optional
 
 # --- Installed  ---
 import asyncpg
@@ -79,8 +79,6 @@ class PostgresClient:
             log.info("PostgreSQL connection pool is not available. Creating new pool.")
 
             async def create_action(_: asyncpg.Connection) -> asyncpg.Pool:
-                # The lambda wrapper for _execute_resiliently requires a conn argument,
-                # but create_pool doesn't use it. We accept it to match the signature.
                 return await asyncpg.create_pool(
                     dsn=self.dsn,
                     min_size=2,
@@ -90,7 +88,6 @@ class PostgresClient:
                     server_settings={"application_name": "trading-system-db-client"},
                 )
 
-            # This is a special case of the executor that doesn't use an existing connection
             try:
                 self._pool = await create_action(None)  # type: ignore
                 log.info("PostgreSQL pool created successfully.")
@@ -116,7 +113,43 @@ class PostgresClient:
                 schema="pg_catalog",
             )
 
-    # --- All public methods are now refactored to use _execute_resiliently ---
+    # --- START OF CORRECTED/ADDED PUBLIC API METHODS ---
+
+    async def execute(self, query: str, *args: Any) -> int:
+        """
+        Public: Executes a command that does not return rows (e.g., INSERT, UPDATE, DELETE).
+        Returns the number of rows affected.
+        """
+        command_name = query.strip().split()[0].upper()
+        log.debug(f"Executing command: {command_name}")
+
+        async def command(conn: asyncpg.Connection) -> int:
+            result_str = await conn.execute(query, *args)
+            try:
+                # Handles formats like "DELETE 5", "INSERT 0 1"
+                return int(result_str.split(" ")[-1])
+            except (ValueError, IndexError):
+                return 0
+
+        return await self._execute_resiliently(command, command_name)
+
+    async def fetch(self, query: str, *args: Any) -> List[asyncpg.Record]:
+        """Public: Fetches multiple rows from the database."""
+        command_name = query.strip().split()[0].upper()
+        log.debug(f"Fetching multiple rows for query: {command_name}")
+        return await self._execute_resiliently(
+            lambda conn: conn.fetch(query, *args), f"fetch_{command_name}"
+        )
+
+    async def fetchrow(self, query: str, *args: Any) -> Optional[asyncpg.Record]:
+        """Public: Fetches a single row from the database."""
+        command_name = query.strip().split()[0].upper()
+        log.debug(f"Fetching single row for query: {command_name}")
+        return await self._execute_resiliently(
+            lambda conn: conn.fetchrow(query, *args), f"fetchrow_{command_name}"
+        )
+
+    # --- END OF PUBLIC API METHODS ---
 
     async def bulk_upsert_ohlc(self, candles: list[dict[str, Any]]):
         if not candles:

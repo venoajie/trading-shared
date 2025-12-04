@@ -15,13 +15,15 @@ import websockets
 # --- Local Application Imports ---
 from ...clients.redis_client import CustomRedisClient
 from ...clients.postgres_client import PostgresClient
-from ...config.models import ExchangeSettings # Configuration model
-#from ..trading.deribit_constants import WebsocketParameters
+from ...config.models import ExchangeSettings  # Configuration model
+
+# from ..trading.deribit_constants import WebsocketParameters
 from ...exchanges.trading.deribit_constants import WebsocketParameters
 from .base import AbstractWsClient
 
 # --- Shared Library Imports  ---
 from trading_engine_core.models import StreamMessage, MarketDefinition
+
 
 class DeribitWsClient(AbstractWsClient):
     def __init__(
@@ -322,5 +324,3 @@ class DeribitWsClient(AbstractWsClient):
                     except asyncio.CancelledError:
                         pass
                 self.monitor_task = None
-
-

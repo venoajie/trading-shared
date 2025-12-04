@@ -20,8 +20,8 @@ class ApiMethods:
     GET_USER_TRADES_BY_ORDER = "private/get_user_trades_by_order"
     CANCEL_ORDER = "private/cancel"
     SIMULATE_PME = "private/pme/simulate"
-    
-    
+
+
 class AccountId:
     DERIBIT_MAIN = "deribit-148510"
 
@@ -32,4 +32,3 @@ class WebsocketParameters:
     MAINTENANCE_THRESHOLD = 300
     HEARTBEAT_INTERVAL = 30
     WEBSOCKET_TIMEOUT = 300
-

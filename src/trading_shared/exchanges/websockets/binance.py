@@ -148,14 +148,12 @@ class BinanceWsClient(AbstractWsClient):
 
                             # Update the Redis Hash for low-latency lookups (Snapshot)
                             redis_key = f"ticker:{symbol}"
-                            
+
                             # Use the pre-fetched pool object
                             await pool.hset(
-                                redis_key, 
-                                "payload", 
-                                orjson.dumps(trade_data)
+                                redis_key, "payload", orjson.dumps(trade_data)
                             )
-                                                        
+
                             yield StreamMessage(
                                 exchange=self.exchange_name,
                                 channel=f"aggTrade.{symbol}.{market_type}",
@@ -175,7 +173,7 @@ class BinanceWsClient(AbstractWsClient):
                                 f"[{self.exchange_name}] Error processing message: {e}. Payload: {message}",
                                 exc_info=True,
                             )
-                            
+
             except (websockets.ConnectionClosed, ConnectionError) as e:
                 log.warning(
                     f"[{self.exchange_name}] Connection closed for market '{self.market_def.market_id}': {e}. Reconnecting in 5s..."
@@ -191,7 +189,7 @@ class BinanceWsClient(AbstractWsClient):
                 await asyncio.sleep(15)
 
     async def process_messages(self) -> AsyncGenerator[StreamMessage, None]:
-        """        
+        """
         Main entry point. Connects to the WebSocket and starts concurrent listener tasks.
         """
         self._is_running.set()

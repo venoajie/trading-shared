@@ -26,6 +26,7 @@ class PostgresSettings(BaseModel):
         """Computes the DSN string for asyncpg."""
         return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.db}"
 
+
 class ExchangeSettings(BaseModel):
     # API keys are now optional, allowing this model to be used
     # for both public and private clients.

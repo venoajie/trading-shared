@@ -1,4 +1,3 @@
-
 # src\trading_shared\clients\redis_client.py
 
 # --- Built Ins  ---
@@ -29,7 +28,7 @@ class CustomRedisClient:
 
     def __init__(self, settings: RedisSettings):
         self._settings = settings
-        self._pool: Optional[aioredis.Redis] = None # Correctly named with underscore
+        self._pool: Optional[aioredis.Redis] = None  # Correctly named with underscore
         self._circuit_open = False
         self._last_failure = 0
         self._reconnect_attempts = 0
@@ -107,7 +106,6 @@ class CustomRedisClient:
             except Exception as e:
                 log.error(f"Error closing Redis pool: {e}")
 
-
     async def _execute_resiliently(
         self,
         func: Callable[[aioredis.Redis], Awaitable[T]],
@@ -168,7 +166,7 @@ class CustomRedisClient:
         raise ConnectionError(
             f"Failed to execute Redis command '{command_name_for_logging}' after retries."
         ) from last_exception
-        
+
     @staticmethod
     def parse_stream_message(message_data: dict[bytes, bytes]) -> dict:
         result = {}
@@ -203,6 +201,7 @@ class CustomRedisClient:
         for chunk_start in range(0, len(message_list), CHUNK_SIZE):
             chunk = message_list[chunk_start : chunk_start + CHUNK_SIZE]
             try:
+
                 async def command(pool: aioredis.Redis, current_chunk=chunk):
                     async with self._write_sem:
                         pipe = pool.pipeline()
@@ -222,6 +221,7 @@ class CustomRedisClient:
                                 approximate=True,
                             )
                         await pipe.execute()
+
                 await self._execute_resiliently(command, "pipeline.execute(xadd)")
             except (ConnectionError, redis_exceptions.ResponseError) as e:
                 log.error(
@@ -232,7 +232,6 @@ class CustomRedisClient:
                     "Failed to write to Redis stream after retries."
                 ) from e
 
-
     async def xadd_to_dlq(
         self,
         original_stream_name: str,
@@ -242,6 +241,7 @@ class CustomRedisClient:
             return
         dlq_stream_name = f"dlq:{original_stream_name}"
         try:
+
             async def command(pool: aioredis.Redis):
                 pipe = pool.pipeline()
                 for msg in failed_messages:
@@ -249,6 +249,7 @@ class CustomRedisClient:
                         dlq_stream_name, {"payload": orjson.dumps(msg)}, maxlen=25000
                     )
                 await pipe.execute()
+
             await self._execute_resiliently(command, "pipeline.execute(xadd_dlq)")
             log.warning(
                 f"{len(failed_messages)} message(s) moved to DLQ stream "
@@ -258,7 +259,6 @@ class CustomRedisClient:
             log.critical(
                 f"CRITICAL: Failed to write to DLQ stream '{dlq_stream_name}': {e}"
             )
-
 
     async def ensure_consumer_group(
         self,
@@ -293,6 +293,7 @@ class CustomRedisClient:
         block: int = 2000,
     ) -> list:
         try:
+
             async def command(pool: aioredis.Redis):
                 try:
                     response = await pool.xreadgroup(
@@ -312,10 +313,10 @@ class CustomRedisClient:
                         await self.ensure_consumer_group(stream_name, group_name)
                         return []
                     raise
+
             return await self._execute_resiliently(command, "xreadgroup")
         except ConnectionError as e:
             raise ConnectionError("Redis connection failed during XREADGROUP") from e
-
 
     async def acknowledge_message(
         self,
@@ -355,7 +356,7 @@ class CustomRedisClient:
         except Exception as e:
             log.error(f"An unexpected error occurred during XAUTOCLAIM: {e}")
             raise
-        
+
     async def get_ticker_data(
         self,
         instrument_name: str,
@@ -395,13 +396,14 @@ class CustomRedisClient:
                 "Defaulting to LOCKED."
             )
             return "LOCKED"
-        
+
     async def set_system_state(
         self,
         state: str,
         reason: str | None = None,
     ):
         try:
+
             async def command(pool: aioredis.Redis):
                 state_data = {
                     "status": state,
@@ -410,6 +412,7 @@ class CustomRedisClient:
                 }
                 await pool.hset("system:state", mapping=state_data)
                 await pool.set("system:state:simple", state)
+
             await self._execute_resiliently(command, "hset/set")
             log_message = f"System state transitioned to: {state.upper()}"
             if reason:
@@ -434,7 +437,6 @@ class CustomRedisClient:
             lambda pool: pool.lpush(self._OHLC_WORK_QUEUE_KEY, orjson.dumps(work_item)),
             "lpush",
         )
-
 
     async def enqueue_failed_ohlc_work(
         self,
@@ -480,16 +482,19 @@ class CustomRedisClient:
     async def get(self, key: str) -> bytes | None:
         async def command(conn: aioredis.Redis) -> bytes | None:
             return await conn.get(key)
+
         return await self._execute_resiliently(command, f"GET {key}")
 
     async def set(self, key: str, value: str, ex: int | None = None):
         async def command(conn: aioredis.Redis):
             await conn.set(key, value, ex=ex)
+
         await self._execute_resiliently(command, f"SET {key}")
 
     async def hset(self, name: str, key: str, value: Any):
         async def command(conn: aioredis.Redis):
             await conn.hset(name, key, value)
+
         await self._execute_resiliently(command, f"HSET {name}")
 
     async def xadd(
@@ -505,8 +510,10 @@ class CustomRedisClient:
             else v
             for k, v in fields.items()
         }
+
         async def command(conn: aioredis.Redis):
             await conn.xadd(
                 name, encoded_fields, maxlen=maxlen, approximate=approximate
             )
+
         await self._execute_resiliently(command, f"XADD {name}")
