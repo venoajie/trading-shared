@@ -33,9 +33,10 @@ class ExchangeSettings(BaseModel):
     client_id: Optional[str] = None
     client_secret: Optional[str] = None
 
-    # A default can be provided for public clients.
+    # WebSocket and REST URLs
+    ws_url: Optional[str] = None
     rest_url: str = Field(default="https://www.deribit.com")
-
+    
 
 class TelegramSettings(BaseModel):
     bot_token: str
