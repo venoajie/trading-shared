@@ -11,7 +11,7 @@ from loguru import logger as log
 
 # --- Local Application Imports ---
 from ...config.models import ExchangeSettings
-from .base import PublicExchangeClient # Assumes an Abstract Base Class exists here.
+from .base import PublicExchangeClient
 
 class DeribitPublicClient(PublicExchangeClient):
     """
@@ -19,9 +19,9 @@ class DeribitPublicClient(PublicExchangeClient):
     This is a consolidated client for use by services like Janitor and Backfill.
     """
     def __init__(self, settings: ExchangeSettings):
-        self._settings = settings
+        super().__init__(settings) # Call parent __init__
         self._session: Optional[aiohttp.ClientSession] = None
-        self.rest_url = self._settings.rest_url
+        self.rest_url = self.settings.rest_url
         if not self.rest_url:
             raise ValueError("Deribit REST API URL ('rest_url') not configured in ExchangeSettings.")
 
@@ -58,7 +58,7 @@ class DeribitPublicClient(PublicExchangeClient):
         start_ts: int,
         end_ts: int,
         resolution: str,
-        market_type: str,  # Unused for Deribit but required by abstract method
+        market_type: str,
     ) -> Dict[str, Any]:
         """Fetches OHLC data from the TradingView-compatible endpoint."""
         params = {
@@ -69,19 +69,62 @@ class DeribitPublicClient(PublicExchangeClient):
         }
         return await self._public_request("public/get_tradingview_chart_data", params)
 
-    # Note: The following methods are migrated from the legacy client for use by the Janitor service.
-    # The transformation logic is kept local for now but should be centralized in a future refactor.
+    async def get_public_trades(
+        self,
+        instrument: str,
+        start_ts: int,
+        end_ts: int,
+        market_type: str,
+    ) -> List[Dict[str, Any]]:
+        """Fetches historical public trades for a given instrument with pagination."""
+        log.info(f"Fetching public trades for {instrument} from {start_ts} to {end_ts}")
+        all_trades = []
+        current_start_ts = start_ts
+
+        while current_start_ts < end_ts:
+            params = {
+                "instrument_name": instrument,
+                "start_timestamp": current_start_ts,
+                "end_timestamp": end_ts,
+                "count": 1000,
+                "sorting": "asc",
+            }
+
+            result = await self._public_request("public/get_last_trades_by_instrument", params)
+            trades = result.get("trades", [])
+            if not trades:
+                break
+
+            for trade in trades:
+                all_trades.append({
+                    "exchange": "deribit",
+                    "instrument_name": instrument,
+                    "market_type": market_type,
+                    "trade_id": trade.get("trade_id", ""),
+                    "price": trade.get("price", 0),
+                    "quantity": trade.get("amount", 0),
+                    "timestamp": datetime.fromtimestamp(trade["timestamp"] / 1000, tz=timezone.utc),
+                    "is_buyer_maker": trade.get("direction", "") == "sell",
+                })
+
+            last_trade_ts = trades[-1]["timestamp"]
+            if last_trade_ts >= end_ts:
+                break
+
+            current_start_ts = last_trade_ts + 1
+            await asyncio.sleep(0.2)
+
+        log.info(f"Fetched {len(all_trades)} public trades for {instrument}")
+        return all_trades
 
     async def get_instruments(self, currencies: List[str]) -> List[Dict[str, Any]]:
-        """
-        Fetches all relevant instruments by looping through the provided currencies.
-        """
+        """Fetches all relevant instruments by looping through the provided currencies."""
+
         all_canonical_instruments = []
         for currency in currencies:
             for kind in ["future", "option"]:
                 params = {"currency": currency, "kind": kind, "expired": "false"}
                 raw_instruments = await self._public_request("public/get_instruments", params)
-
                 if raw_instruments and isinstance(raw_instruments, list):
                     transformed = [self._transform_instrument(inst) for inst in raw_instruments]
                     all_canonical_instruments.extend(transformed)
@@ -89,6 +132,7 @@ class DeribitPublicClient(PublicExchangeClient):
                 await asyncio.sleep(0.2)
         return all_canonical_instruments
 
+        
     def _transform_instrument(self, raw_instrument: Dict[str, Any]) -> Dict[str, Any]:
         """Transforms a single raw Deribit instrument into our canonical format."""
         exp_ts_ms = raw_instrument.get("expiration_timestamp")
