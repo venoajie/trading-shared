@@ -120,8 +120,8 @@ class BinanceWsClient(AbstractWsClient):
             log.warning(
                 f"[{self.exchange_name}] No initial streams to subscribe to for market '{self.market_def.market_id}'. Client will be idle until commanded."
             )
-            await self._is_running.wait()
-            # The 'return' statement that was here has been removed.
+            # MODIFIED: Replace blocking wait with a simple return to allow the reconnect loop to handle the delay.
+            return
 
         url = f"{self.ws_connection_url}?streams={stream_names}"
 
