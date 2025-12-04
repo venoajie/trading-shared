@@ -48,9 +48,12 @@ class BinanceWsClient(AbstractWsClient):
         method: str,
         params: list,
     ):
-        if not self._ws or not self._ws.open:
+        
+        if not self._ws:
             log.warning("WebSocket is not connected. Cannot send subscription request.")
             return
+
+        request_id = int(asyncio.get_running_loop().time() * 1000)
 
         request_id = int(asyncio.get_running_loop().time() * 1000)
         payload = {"method": method, "params": params, "id": request_id}
