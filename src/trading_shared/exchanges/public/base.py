@@ -1,21 +1,24 @@
-# src\trading_shared\exchange\public\base.py
+# src/trading_shared/exchanges/public/base.py
 
 # --- Built Ins  ---
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any
 
+# --- Shared Library Imports ---
+from ...config.models import ExchangeSettings 
 
 class PublicExchangeClient(ABC):
     """
-    Defines the standard interface for a REST API client used by the Janitor.
+    Defines the standard interface for a public REST API client.
+    This contract is used by services like Janitor and Backfill.
     """
 
-    def __init__(self, config: Dict[str, Any]):
-        self.config = config
+    def __init__(self, settings: ExchangeSettings):
+        self.settings = settings
 
     @abstractmethod
     async def connect(self):
-        """Establishes the client session and handles authentication."""
+        """Establishes the client session."""
         pass
 
     @abstractmethod
@@ -24,8 +27,8 @@ class PublicExchangeClient(ABC):
         pass
 
     @abstractmethod
-    async def get_instruments(self) -> List[Dict[str, Any]]:
-        """Fetches all relevant instruments for the exchange."""
+    async def get_instruments(self, currencies: List[str]) -> List[Dict[str, Any]]:
+        """Fetches all relevant instruments for the exchange for a list of currencies."""
         pass
 
     @abstractmethod
@@ -48,8 +51,5 @@ class PublicExchangeClient(ABC):
         end_ts: int,
         market_type: str,
     ) -> List[Dict[str, Any]]:
-        """
-        [NEW] Fetches historical PUBLIC trades for a given instrument. This is for
-        market data analysis, not private account auditing.
-        """
+        """Fetches historical public trades for a given instrument."""
         pass
