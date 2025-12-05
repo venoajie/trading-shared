@@ -143,7 +143,6 @@ class PostgresClient:
             lambda conn: conn.fetchrow(query, *args), f"fetchrow_{command_name}"
         )
 
-    # --- [NEW] Implemented missing method using modern architecture ---
     async def bulk_upsert_instruments(self, instruments: List[Dict[str, Any]], exchange_name: str):
         """
         Performs a bulk upsert of instrument data by calling a database stored procedure.
@@ -169,14 +168,16 @@ class PostgresClient:
         ]
 
         async def command(conn: asyncpg.Connection):
+            # Added explicit type cast to match the database function signature.
             await conn.execute(
-                "SELECT bulk_upsert_instruments($1, $2)",
+                "SELECT bulk_upsert_instruments($1::instrument_upsert_type[], $2)",
                 records_to_upsert,
                 exchange_name,
             )
 
         await self._execute_resiliently(command, "bulk_upsert_instruments")
-
+        log.info(f"Successfully bulk-upserted {len(records_to_upsert)} instruments for '{exchange_name}'.")
+        
     async def bulk_upsert_ohlc(self, candles: list[dict[str, Any]]):
         if not candles: return
         records = [self._prepare_ohlc_record(c) for c in candles]
