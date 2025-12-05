@@ -22,6 +22,7 @@ from .base import AbstractWsClient
 # --- Shared Library Imports  ---
 from trading_engine_core.models import StreamMessage, MarketDefinition
 
+
 class DeribitWsClient(AbstractWsClient):
     def __init__(
         self,
@@ -43,7 +44,6 @@ class DeribitWsClient(AbstractWsClient):
         self.websocket_client: Optional[websockets.WebSocketClientProtocol] = None
         self.instrument_names: List[str] = []
 
-        
     async def _send_json(
         self,
         data: dict,
@@ -51,7 +51,7 @@ class DeribitWsClient(AbstractWsClient):
         """Use standard json for Deribit compatibility"""
         if self.websocket_client:
             await self.websocket_client.send(json.dumps(data))
-            
+
     async def _auth(self) -> bool:
         """
         Authenticates and waits specifically for the auth response,
@@ -225,23 +225,31 @@ class DeribitWsClient(AbstractWsClient):
         """
         async with websockets.connect(self.ws_connection_url, ping_interval=None) as ws:
             self.websocket_client = ws
-            log.info(f"[{self.exchange_name}] WebSocket connection established for '{self.market_def.market_id}'.")
+            log.info(
+                f"[{self.exchange_name}] WebSocket connection established for '{self.market_def.market_id}'."
+            )
 
             # Authenticate and subscribe for this connection
             if not await self._auth():
                 log.error("Authentication failed, closing this connection attempt.")
-                return # Exits the generator
+                return  # Exits the generator
             await self._subscribe()
 
             # Yield messages from this connection
             async for message in ws:
                 try:
                     data = orjson.loads(message)
-                    if not isinstance(data, dict): continue
-                    if self._handle_control_message(data): continue
+                    if not isinstance(data, dict):
+                        continue
+                    if self._handle_control_message(data):
+                        continue
 
                     params = data.get("params")
-                    if isinstance(params, dict) and "channel" in params and "data" in params:
+                    if (
+                        isinstance(params, dict)
+                        and "channel" in params
+                        and "data" in params
+                    ):
                         yield StreamMessage(
                             exchange=self.exchange_name,
                             channel=params["channel"],
@@ -261,7 +269,9 @@ class DeribitWsClient(AbstractWsClient):
         """
         self._is_running.set()
         reconnect_attempts = 0
-        log.info(f"[{self.exchange_name}] Starting message processor for '{self.market_def.market_id}'.")
+        log.info(
+            f"[{self.exchange_name}] Starting message processor for '{self.market_def.market_id}'."
+        )
 
         while self._is_running.is_set():
             try:
@@ -269,18 +279,24 @@ class DeribitWsClient(AbstractWsClient):
                 # Get the generator from a new connection attempt
                 message_generator = self.connect()
                 async for message in message_generator:
-                    if not self._is_running.is_set(): break
-                    reconnect_attempts = 0 # Reset on successful message
+                    if not self._is_running.is_set():
+                        break
+                    reconnect_attempts = 0  # Reset on successful message
                     batch.append(message.model_dump(exclude_none=True))
                     if len(batch) >= 100:
                         await self.redis_client.xadd_bulk(self.stream_name, batch)
-                        log.debug(f"[{self.exchange_name}] Flushed batch of {len(batch)} messages to Redis.")
+                        log.debug(
+                            f"[{self.exchange_name}] Flushed batch of {len(batch)} messages to Redis."
+                        )
                         batch.clear()
 
             except asyncio.CancelledError:
-                break # Exit loop cleanly on cancellation
+                break  # Exit loop cleanly on cancellation
             except Exception as e:
-                log.error(f"[{self.exchange_name}] Unhandled error in processor for '{self.market_def.market_id}': {e}", exc_info=True)
+                log.error(
+                    f"[{self.exchange_name}] Unhandled error in processor for '{self.market_def.market_id}': {e}",
+                    exc_info=True,
+                )
 
             finally:
                 # This block runs on any exit from the `try` block (clean or error)
@@ -290,19 +306,27 @@ class DeribitWsClient(AbstractWsClient):
                 if self._is_running.is_set():
                     reconnect_attempts += 1
                     delay = min(2**reconnect_attempts, 60) + random.random()
-                    log.info(f"[{self.exchange_name}] Message stream for '{self.market_def.market_id}' ended. Reconnecting in {delay:.1f}s...")
+                    log.info(
+                        f"[{self.exchange_name}] Message stream for '{self.market_def.market_id}' ended. Reconnecting in {delay:.1f}s..."
+                    )
                     await asyncio.sleep(delay)
 
-        log.info(f"[{self.exchange_name}] Message processor for '{self.market_def.market_id}' shut down.")
+        log.info(
+            f"[{self.exchange_name}] Message processor for '{self.market_def.market_id}' shut down."
+        )
 
     async def close(self):
         """Gracefully shuts down the websocket client."""
-        log.info(f"[{self.exchange_name}] Closing client for '{self.market_def.market_id}'...")
+        log.info(
+            f"[{self.exchange_name}] Closing client for '{self.market_def.market_id}'..."
+        )
         self._is_running.clear()
         if self.websocket_client:
             # The close() method handles already-closed connections gracefully.
             try:
                 await self.websocket_client.close()
             except websockets.exceptions.ConnectionClosed:
-                pass # Suppress error if already closed
-        log.info(f"[{self.exchange_name}] Client for '{self.market_def.market_id}' closed.")
+                pass  # Suppress error if already closed
+        log.info(
+            f"[{self.exchange_name}] Client for '{self.market_def.market_id}' closed."
+        )

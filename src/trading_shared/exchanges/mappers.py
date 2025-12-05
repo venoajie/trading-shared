@@ -8,8 +8,8 @@ from trading_engine_core.enums import MarketType
 
 
 def get_canonical_market_type(
-    exchange_name: str, 
-    raw_instrument: Dict[str, Any], 
+    exchange_name: str,
+    raw_instrument: Dict[str, Any],
     source_hint: str = None,
 ) -> MarketType:
     """

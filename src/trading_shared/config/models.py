@@ -36,7 +36,7 @@ class ExchangeSettings(BaseModel):
     # WebSocket and REST URLs
     ws_url: Optional[str] = None
     rest_url: str = Field(default="https://www.deribit.com")
-    
+
 
 class TelegramSettings(BaseModel):
     bot_token: str

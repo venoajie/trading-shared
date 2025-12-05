@@ -9,6 +9,7 @@ from trading_engine_core.models import MarketDefinition, StreamMessage
 from ...clients.postgres_client import PostgresClient
 from ...clients.redis_client import CustomRedisClient
 
+
 class AbstractWsClient(ABC):
     """An abstract base class for exchange WebSocket clients."""
 
@@ -28,7 +29,7 @@ class AbstractWsClient(ABC):
     @abstractmethod
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
         """Connects, authenticates, subscribes, and yields canonical StreamMessage objects."""
-        yield # This makes the method an async generator
+        yield  # This makes the method an async generator
 
     @abstractmethod
     async def process_messages(self):

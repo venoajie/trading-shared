@@ -5,7 +5,8 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any
 
 # --- Shared Library Imports ---
-from ...config.models import ExchangeSettings 
+from ...config.models import ExchangeSettings
+
 
 class PublicExchangeClient(ABC):
     """

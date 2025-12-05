@@ -88,9 +88,7 @@ class PostgresClient:
                 log.info("PostgreSQL pool created successfully.")
                 return self._pool
             except Exception as e:
-                raise ConnectionError(
-                    "Fatal: Could not create PostgreSQL pool."
-                ) from e
+                raise ConnectionError("Fatal: Could not create PostgreSQL pool.") from e
 
     async def close_pool(self):
         async with self._lock:
@@ -107,7 +105,6 @@ class PostgresClient:
                 decoder=orjson.loads,
                 schema="pg_catalog",
             )
-
 
     # --- START OF PUBLIC API METHODS ---
 
@@ -143,7 +140,9 @@ class PostgresClient:
             lambda conn: conn.fetchrow(query, *args), f"fetchrow_{command_name}"
         )
 
-    async def bulk_upsert_instruments(self, instruments: List[Dict[str, Any]], exchange_name: str):
+    async def bulk_upsert_instruments(
+        self, instruments: List[Dict[str, Any]], exchange_name: str
+    ):
         """
         Performs a bulk upsert of instrument data by calling a database stored procedure.
         """
@@ -161,28 +160,42 @@ class PostgresClient:
                 inst.get("settlement_period"),
                 inst.get("tick_size"),
                 inst.get("contract_size"),
-                inst.get("expiration_timestamp"),
+                inst.get("expiration_timestamp"),  # Passed as ISO string
                 inst.get("data"),
             )
             for inst in instruments
         ]
 
         async def command(conn: asyncpg.Connection):
-            # Added explicit type cast to match the database function signature.
+            # Switched from SELECT to a DO/PERFORM block to avoid triggering
+            # asyncpg's unsupported composite type decoder on the void return.
+            sql = """
+                DO $$
+                BEGIN
+                    PERFORM bulk_upsert_instruments($1::instrument_upsert_type[], $2);
+                END $$;
+            """
             await conn.execute(
-                "SELECT bulk_upsert_instruments($1::instrument_upsert_type[], $2)",
+                sql,
                 records_to_upsert,
                 exchange_name,
             )
 
         await self._execute_resiliently(command, "bulk_upsert_instruments")
-        log.info(f"Successfully bulk-upserted {len(records_to_upsert)} instruments for '{exchange_name}'.")
-        
+        log.info(
+            f"Successfully bulk-upserted {len(records_to_upsert)} instruments for '{exchange_name}'."
+        )
+
     async def bulk_upsert_ohlc(self, candles: list[dict[str, Any]]):
-        if not candles: return
+        if not candles:
+            return
         records = [self._prepare_ohlc_record(c) for c in candles]
+
         async def command(conn: asyncpg.Connection):
-            await conn.execute("SELECT bulk_upsert_ohlc($1::ohlc_upsert_type[])", records)
+            await conn.execute(
+                "SELECT bulk_upsert_ohlc($1::ohlc_upsert_type[])", records
+            )
+
         await self._execute_resiliently(command, "bulk_upsert_ohlc")
 
     async def fetch_all_instruments(self) -> list[asyncpg.Record]:

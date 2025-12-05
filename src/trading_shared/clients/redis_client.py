@@ -487,6 +487,7 @@ class CustomRedisClient:
 
     async def publish(self, channel: str, message: str | bytes):
         """Publishes a message to a channel."""
+
         async def command(conn: aioredis.Redis):
             return await conn.publish(channel, message)
 
@@ -497,7 +498,7 @@ class CustomRedisClient:
             await conn.set(key, value, ex=ex)
 
         await self._execute_resiliently(command, f"SET {key}")
-        
+
     async def hset(self, name: str, key: str, value: Any):
         async def command(conn: aioredis.Redis):
             await conn.hset(name, key, value)

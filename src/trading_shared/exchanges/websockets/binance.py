@@ -48,7 +48,6 @@ class BinanceWsClient(AbstractWsClient):
         method: str,
         params: list,
     ):
-        
         if not self._ws:
             log.warning("WebSocket is not connected. Cannot send subscription request.")
             return
@@ -78,17 +77,20 @@ class BinanceWsClient(AbstractWsClient):
                     continue
 
                 log.info(f"Received command on control channel: {message['data']}")
-                command = orjson.loads(message['data'])
+                command = orjson.loads(message["data"])
                 action = command.get("action")
                 # Correctly handle symbol format which is now a simple list of strings
                 symbols_to_modify = command.get("symbols", [])
 
                 if not symbols_to_modify:
                     continue
-                
+
                 # The symbols from initial_subscriptions are already in the correct format (e.g., "btcusdt@trade")
                 # A more robust solution would be to define the stream type in config. Assuming 'aggTrade' for now.
-                streams_to_modify = [f"{symbol.lower().split('@')[0]}@aggTrade" for symbol in symbols_to_modify]
+                streams_to_modify = [
+                    f"{symbol.lower().split('@')[0]}@aggTrade"
+                    for symbol in symbols_to_modify
+                ]
 
                 if action == "subscribe":
                     new_subs = [
@@ -127,9 +129,7 @@ class BinanceWsClient(AbstractWsClient):
 
         try:
             log.info(f"[{self.exchange_name}] Connecting to: {url}")
-            async with websockets.connect(
-                url, ping_interval=20, ping_timeout=60
-            ) as ws:
+            async with websockets.connect(url, ping_interval=20, ping_timeout=60) as ws:
                 self._ws = ws
                 log.success(
                     f"[{self.exchange_name}] WebSocket connection established for market '{self.market_def.market_id}'."
@@ -144,7 +144,7 @@ class BinanceWsClient(AbstractWsClient):
                         trade_data = payload["data"]
                         stream_name = payload["stream"]
                         symbol = stream_name.split("@")[0].upper()
-                        
+
                         # Use market_type from the MarketDefinition object
                         market_type_str = self.market_def.market_type.value
 
@@ -168,9 +168,8 @@ class BinanceWsClient(AbstractWsClient):
                             exc_info=True,
                         )
         finally:
-            self._ws = None # Ensure websocket object is cleared on exit
+            self._ws = None  # Ensure websocket object is cleared on exit
             log.warning(f"[{self.exchange_name}] Disconnected from {url}.")
-
 
     async def process_messages(self):
         """
@@ -178,8 +177,10 @@ class BinanceWsClient(AbstractWsClient):
         This method now correctly implements the 'process_messages' abstract method.
         """
         self._is_running.set()
-        log.info(f"[{self.exchange_name}] Starting message processor for '{self.market_def.market_id}'.")
-        
+        log.info(
+            f"[{self.exchange_name}] Starting message processor for '{self.market_def.market_id}'."
+        )
+
         listener_task = asyncio.create_task(self._control_channel_listener())
         reconnect_attempts = 0
 
@@ -188,9 +189,10 @@ class BinanceWsClient(AbstractWsClient):
                 batch = []
                 message_generator = self.connect()
                 async for message in message_generator:
-                    if not self._is_running.is_set(): break
+                    if not self._is_running.is_set():
+                        break
                     reconnect_attempts = 0  # Reset on successful message
-                    
+
                     # Update Redis ticker snapshot
                     redis_key = f"ticker:{message.data['symbol']}"
                     await self.redis_client.hset(
@@ -201,24 +203,33 @@ class BinanceWsClient(AbstractWsClient):
                     batch.append(message.model_dump(exclude_none=True))
                     if len(batch) >= 100:
                         await self.redis_client.xadd_bulk(self.stream_name, batch)
-                        log.debug(f"[{self.exchange_name}] Flushed batch of {len(batch)} messages to Redis.")
+                        log.debug(
+                            f"[{self.exchange_name}] Flushed batch of {len(batch)} messages to Redis."
+                        )
                         batch.clear()
-            
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                log.error(f"[{self.exchange_name}] Unhandled error in processor for '{self.market_def.market_id}': {e}", exc_info=True)
-            
+                log.error(
+                    f"[{self.exchange_name}] Unhandled error in processor for '{self.market_def.market_id}': {e}",
+                    exc_info=True,
+                )
+
             finally:
                 if self._is_running.is_set():
                     reconnect_attempts += 1
                     delay = min(2**reconnect_attempts, 60)
-                    log.info(f"[{self.exchange_name}] Message stream for '{self.market_def.market_id}' ended. Reconnecting in {delay}s...")
+                    log.info(
+                        f"[{self.exchange_name}] Message stream for '{self.market_def.market_id}' ended. Reconnecting in {delay}s..."
+                    )
                     await asyncio.sleep(delay)
-        
+
         listener_task.cancel()
         await asyncio.gather(listener_task, return_exceptions=True)
-        log.info(f"[{self.exchange_name}] Message processor for '{self.market_def.market_id}' shut down.")
+        log.info(
+            f"[{self.exchange_name}] Message processor for '{self.market_def.market_id}' shut down."
+        )
 
     async def close(self):
         """
@@ -226,8 +237,12 @@ class BinanceWsClient(AbstractWsClient):
         This method now correctly implements the 'close' abstract method.
         """
 
-        log.info(f"[{self.exchange_name}] Closing client for '{self.market_def.market_id}'...")
+        log.info(
+            f"[{self.exchange_name}] Closing client for '{self.market_def.market_id}'..."
+        )
         self._is_running.clear()
         if self._ws and self._ws.open:
             await self._ws.close()
-        log.info(f"[{self.exchange_name}] Client for '{self.market_def.market_id}' closed.")
+        log.info(
+            f"[{self.exchange_name}] Client for '{self.market_def.market_id}' closed."
+        )
