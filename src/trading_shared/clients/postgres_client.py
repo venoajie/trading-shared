@@ -142,39 +142,25 @@ class PostgresClient:
 
     async def bulk_upsert_instruments(self, instruments: List[Dict[str, Any]], exchange_name: str):
         """
-        Performs a bulk upsert of instrument data by calling a database stored procedure.
+        Performs a bulk upsert of instrument data by passing an array of JSONB
+        objects to the legacy database function.
         """
         if not instruments:
             return
 
-        records_to_upsert = [
-            (
-                inst.get("instrument_name"),
-                inst.get("market_type"),
-                inst.get("instrument_kind"),
-                inst.get("base_asset"),
-                inst.get("quote_asset"),
-                inst.get("settlement_asset"),
-                inst.get("settlement_period"),
-                inst.get("tick_size"),
-                inst.get("contract_size"),
-                inst.get("expiration_timestamp"), # Passed as ISO string
-                inst.get("data"),
-            )
-            for inst in instruments
-        ]
+        # The legacy function expects the exchange name to be inside the JSON payload.
+        for inst in instruments:
+            inst['exchange'] = exchange_name
 
         async def command(conn: asyncpg.Connection):
-            # Switched to CALL syntax for invoking a procedure, which
-            # correctly supports parameters and has no return value to decode.
+            # The 'instruments' list of dicts is automatically encoded to JSONB[].
             await conn.execute(
-                "CALL bulk_upsert_instruments($1::instrument_upsert_type[], $2)",
-                records_to_upsert,
-                exchange_name,
+                "SELECT bulk_upsert_instruments($1::jsonb[])",
+                instruments,
             )
 
         await self._execute_resiliently(command, "bulk_upsert_instruments")
-        log.info(f"Successfully bulk-upserted {len(records_to_upsert)} instruments for '{exchange_name}'.")
+        log.info(f"Successfully bulk-upserted {len(instruments)} instruments for '{exchange_name}'.")
         
     async def bulk_upsert_ohlc(self, candles: list[dict[str, Any]]):
         if not candles:
