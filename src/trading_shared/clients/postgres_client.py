@@ -36,19 +36,16 @@ class PostgresClient:
     ) -> T:
         """
         Executes a PostgreSQL command with a retry mechanism for connection errors.
-        It manages acquiring a connection from the pool and transparently retries
-        on transient network failures.
         """
         last_exception: Exception | None = None
         for attempt in range(3):
             try:
                 pool = await self.start_pool()
                 async with pool.acquire() as conn:
-                    # Pass the acquired connection to the function to be executed
                     return await command_func(conn)
             except (
                 asyncpg.PostgresConnectionError,
-                asyncpg.InterfaceError,  # Catches stream-closed type errors
+                asyncpg.InterfaceError,
                 TimeoutError,
             ) as e:
                 log.warning(
@@ -78,23 +75,21 @@ class PostgresClient:
 
             log.info("PostgreSQL connection pool is not available. Creating new pool.")
 
-            async def create_action(_: asyncpg.Connection) -> asyncpg.Pool:
-                return await asyncpg.create_pool(
+            try:
+                # [FIXED] Aligned pool size with best practices for PgBouncer.
+                self._pool = await asyncpg.create_pool(
                     dsn=self.dsn,
-                    min_size=2,
-                    max_size=10,
+                    min_size=1,
+                    max_size=2,
                     command_timeout=30,
                     init=self._setup_json_codec,
                     server_settings={"application_name": "trading-system-db-client"},
                 )
-
-            try:
-                self._pool = await create_action(None)  # type: ignore
                 log.info("PostgreSQL pool created successfully.")
                 return self._pool
             except Exception as e:
                 raise ConnectionError(
-                    "Fatal: Could not create PostgreSQL pool after multiple retries."
+                    "Fatal: Could not create PostgreSQL pool."
                 ) from e
 
     async def close_pool(self):
@@ -113,7 +108,8 @@ class PostgresClient:
                 schema="pg_catalog",
             )
 
-    # --- START OF CORRECTED/ADDED PUBLIC API METHODS ---
+
+    # --- START OF PUBLIC API METHODS ---
 
     async def execute(self, query: str, *args: Any) -> int:
         """
@@ -136,7 +132,6 @@ class PostgresClient:
     async def fetch(self, query: str, *args: Any) -> List[asyncpg.Record]:
         """Public: Fetches multiple rows from the database."""
         command_name = query.strip().split()[0].upper()
-        log.debug(f"Fetching multiple rows for query: {command_name}")
         return await self._execute_resiliently(
             lambda conn: conn.fetch(query, *args), f"fetch_{command_name}"
         )
@@ -144,38 +139,50 @@ class PostgresClient:
     async def fetchrow(self, query: str, *args: Any) -> Optional[asyncpg.Record]:
         """Public: Fetches a single row from the database."""
         command_name = query.strip().split()[0].upper()
-        log.debug(f"Fetching single row for query: {command_name}")
         return await self._execute_resiliently(
             lambda conn: conn.fetchrow(query, *args), f"fetchrow_{command_name}"
         )
 
-    # --- END OF PUBLIC API METHODS ---
-
-    async def bulk_upsert_ohlc(self, candles: list[dict[str, Any]]):
-        if not candles:
+    # --- [NEW] Implemented missing method using modern architecture ---
+    async def bulk_upsert_instruments(self, instruments: List[Dict[str, Any]], exchange_name: str):
+        """
+        Performs a bulk upsert of instrument data by calling a database stored procedure.
+        """
+        if not instruments:
             return
 
-        records = [self._prepare_ohlc_record(c) for c in candles]
+        records_to_upsert = [
+            (
+                inst.get("instrument_name"),
+                inst.get("market_type"),
+                inst.get("instrument_kind"),
+                inst.get("base_asset"),
+                inst.get("quote_asset"),
+                inst.get("settlement_asset"),
+                inst.get("settlement_period"),
+                inst.get("tick_size"),
+                inst.get("contract_size"),
+                inst.get("expiration_timestamp"),
+                inst.get("data"),
+            )
+            for inst in instruments
+        ]
 
         async def command(conn: asyncpg.Connection):
-            try:
-                async with conn.transaction():
-                    await conn.execute(
-                        "SELECT bulk_upsert_ohlc($1::ohlc_upsert_type[])", records
-                    )
-            except asyncpg.PostgresError as e:
-                if "does not exist" in str(e):
-                    log.warning(
-                        f"Database schema not ready for OHLC upsert. Error: {e}"
-                    )
-                    # This will be retried by the wrapper.
-                raise e  # Re-raise to allow the resilient wrapper to catch it if it's a connection issue
+            await conn.execute(
+                "SELECT bulk_upsert_instruments($1, $2)",
+                records_to_upsert,
+                exchange_name,
+            )
 
-        try:
-            await self._execute_resiliently(command, "bulk_upsert_ohlc")
-        except Exception as e:
-            log.error(f"Failed to execute bulk_upsert_ohlc after retries: {e}")
-            raise
+        await self._execute_resiliently(command, "bulk_upsert_instruments")
+
+    async def bulk_upsert_ohlc(self, candles: list[dict[str, Any]]):
+        if not candles: return
+        records = [self._prepare_ohlc_record(c) for c in candles]
+        async def command(conn: asyncpg.Connection):
+            await conn.execute("SELECT bulk_upsert_ohlc($1::ohlc_upsert_type[])", records)
+        await self._execute_resiliently(command, "bulk_upsert_ohlc")
 
     async def fetch_all_instruments(self) -> list[asyncpg.Record]:
         async def command(conn: asyncpg.Connection):
