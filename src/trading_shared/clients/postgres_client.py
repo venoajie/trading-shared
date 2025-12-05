@@ -4,7 +4,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any, List, TypeVar, Optional
+from typing import Any, Dict, List, TypeVar, Optional
 
 # --- Installed  ---
 import asyncpg
