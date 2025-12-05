@@ -263,6 +263,29 @@ class PostgresClient:
         except ValueError as e:
             raise ValueError(f"Unknown resolution format: {resolution}") from e
 
+
+    async def fetch_latest_ohlc_timestamp(
+        self,
+        exchange_name: str,
+        instrument_name: str,
+        resolution_td: timedelta,
+    ) -> Optional[datetime]:
+        """
+        Fetches the most recent timestamp for a given instrument's OHLC data
+        at a specific resolution.
+        """
+        query = """
+            SELECT MAX(tick) AS latest_tick FROM ohlc
+            WHERE exchange = $1 AND instrument_name = $2 AND resolution = $3
+        """
+        
+        # This uses the generic, resilient fetchrow method already in the class
+        result = await self.fetchrow(query, exchange_name, instrument_name, resolution_td)
+        
+        if result and result['latest_tick']:
+            return result['latest_tick']
+        return None
+
     def _prepare_ohlc_record(
         self,
         candle_data: dict[str, Any],
