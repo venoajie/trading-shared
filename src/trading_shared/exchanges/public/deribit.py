@@ -13,20 +13,21 @@ from loguru import logger as log
 from ...config.models import ExchangeSettings
 from .base import PublicExchangeClient
 
+
 class DeribitPublicClient(PublicExchangeClient):
     """
     An API client for public, non-authenticated Deribit endpoints.
-    This is a consolidated client for use by services like Janitor and Backfill.
+    This client returns RAW, untransformed data from the exchange.
     """
     def __init__(self, settings: ExchangeSettings):
-        super().__init__(settings) # Call parent __init__
+        super().__init__(settings)
         self._session: Optional[aiohttp.ClientSession] = None
         self.rest_url = self.settings.rest_url
         if not self.rest_url:
             raise ValueError("Deribit REST API URL ('rest_url') not configured in ExchangeSettings.")
 
     async def connect(self):
-        """Establishes the client session. No login is required."""
+        """Establishes the client session."""
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession()
             log.info("[DeribitPublicClient] Public aiohttp session established.")
@@ -37,7 +38,7 @@ class DeribitPublicClient(PublicExchangeClient):
             await self._session.close()
             log.info("[DeribitPublicClient] Public aiohttp session closed.")
 
-    async def _public_request(self, endpoint: str, params: Optional[dict] = None) -> Dict[str, Any]:
+    async def _public_request(self, endpoint: str, params: Optional[dict] = None) -> Any:
         """Helper for making a public request to Deribit."""
         if not self._session or self._session.closed:
             raise ConnectionError("Session not established. Call connect() first.")
@@ -47,11 +48,28 @@ class DeribitPublicClient(PublicExchangeClient):
             async with self._session.get(url, params=params, timeout=20) as response:
                 response.raise_for_status()
                 data = await response.json()
-                return data.get("result", {})
+                return data.get("result", [])
         except Exception as e:
             log.error(f"Failed to fetch from Deribit public endpoint {endpoint}: {e}")
-            return {}
-
+            return []
+    
+    async def get_instruments(self, currencies: List[str]) -> List[Dict[str, Any]]:
+        """
+        Fetches all relevant raw instruments by looping through the provided currencies.
+        Returns the data without transformation.
+        """
+        all_raw_instruments = []
+        for currency in currencies:
+            for kind in ["future", "option"]:
+                params = {"currency": currency, "kind": kind, "expired": "false"}
+                raw_instruments = await self._public_request("public/get_instruments", params)
+                if raw_instruments and isinstance(raw_instruments, list):
+                    all_raw_instruments.extend(raw_instruments)
+                    log.info(f"[DeribitPublicClient] Fetched {len(raw_instruments)} raw {kind} instruments for {currency}.")
+                # Rate limit requests
+                await asyncio.sleep(0.2)
+        return all_raw_instruments
+    
     async def get_historical_ohlc(
         self,
         instrument: str,
@@ -67,8 +85,17 @@ class DeribitPublicClient(PublicExchangeClient):
             "end_timestamp": end_ts,
             "resolution": resolution,
         }
-        return await self._public_request("public/get_tradingview_chart_data", params)
-
+        # This endpoint returns a dict, not a list, so we handle its result differently
+        url = f"{self.rest_url}/api/v2/public/get_tradingview_chart_data"
+        try:
+            async with self._session.get(url, params=params, timeout=20) as response:
+                response.raise_for_status()
+                data = await response.json()
+                return data.get("result", {})
+        except Exception as e:
+            log.error(f"Failed to fetch OHLC from Deribit: {e}")
+            return {}
+        
     async def get_public_trades(
         self,
         instrument: str,
@@ -116,23 +143,7 @@ class DeribitPublicClient(PublicExchangeClient):
 
         log.info(f"Fetched {len(all_trades)} public trades for {instrument}")
         return all_trades
-
-    async def get_instruments(self, currencies: List[str]) -> List[Dict[str, Any]]:
-        """Fetches all relevant instruments by looping through the provided currencies."""
-
-        all_canonical_instruments = []
-        for currency in currencies:
-            for kind in ["future", "option"]:
-                params = {"currency": currency, "kind": kind, "expired": "false"}
-                raw_instruments = await self._public_request("public/get_instruments", params)
-                if raw_instruments and isinstance(raw_instruments, list):
-                    transformed = [self._transform_instrument(inst) for inst in raw_instruments]
-                    all_canonical_instruments.extend(transformed)
-                    log.info(f"[DeribitPublicClient] Fetched and transformed {len(transformed)} {kind} instruments for {currency}.")
-                await asyncio.sleep(0.2)
-        return all_canonical_instruments
-
-        
+    
     def _transform_instrument(self, raw_instrument: Dict[str, Any]) -> Dict[str, Any]:
         """Transforms a single raw Deribit instrument into our canonical format."""
         exp_ts_ms = raw_instrument.get("expiration_timestamp")
