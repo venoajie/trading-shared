@@ -140,9 +140,7 @@ class PostgresClient:
             lambda conn: conn.fetchrow(query, *args), f"fetchrow_{command_name}"
         )
 
-    async def bulk_upsert_instruments(
-        self, instruments: List[Dict[str, Any]], exchange_name: str
-    ):
+    async def bulk_upsert_instruments(self, instruments: List[Dict[str, Any]], exchange_name: str):
         """
         Performs a bulk upsert of instrument data by calling a database stored procedure.
         """
@@ -160,32 +158,24 @@ class PostgresClient:
                 inst.get("settlement_period"),
                 inst.get("tick_size"),
                 inst.get("contract_size"),
-                inst.get("expiration_timestamp"),  # Passed as ISO string
+                inst.get("expiration_timestamp"), # Passed as ISO string
                 inst.get("data"),
             )
             for inst in instruments
         ]
 
         async def command(conn: asyncpg.Connection):
-            # Switched from SELECT to a DO/PERFORM block to avoid triggering
-            # asyncpg's unsupported composite type decoder on the void return.
-            sql = """
-                DO $$
-                BEGIN
-                    PERFORM bulk_upsert_instruments($1::instrument_upsert_type[], $2);
-                END $$;
-            """
+            # Switched to CALL syntax for invoking a procedure, which
+            # correctly supports parameters and has no return value to decode.
             await conn.execute(
-                sql,
+                "CALL bulk_upsert_instruments($1::instrument_upsert_type[], $2)",
                 records_to_upsert,
                 exchange_name,
             )
 
         await self._execute_resiliently(command, "bulk_upsert_instruments")
-        log.info(
-            f"Successfully bulk-upserted {len(records_to_upsert)} instruments for '{exchange_name}'."
-        )
-
+        log.info(f"Successfully bulk-upserted {len(records_to_upsert)} instruments for '{exchange_name}'.")
+        
     async def bulk_upsert_ohlc(self, candles: list[dict[str, Any]]):
         if not candles:
             return
