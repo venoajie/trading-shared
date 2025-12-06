@@ -140,6 +140,13 @@ class PostgresClient:
             lambda conn: conn.fetchrow(query, *args), f"fetchrow_{command_name}"
         )
 
+    async def fetchval(self, query: str, *args: Any) -> Any:
+        """Public: Fetches a single scalar value from the database."""
+        command_name = query.strip().split()[0].upper()
+        return await self._execute_resiliently(
+            lambda conn: conn.fetchval(query, *args), f"fetchval_{command_name}"
+        )
+        
     async def bulk_upsert_instruments(self, instruments: List[Dict[str, Any]], exchange_name: str):
         """
         Performs a bulk upsert of instrument data by passing an array of JSONB
