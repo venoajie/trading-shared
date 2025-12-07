@@ -2,7 +2,7 @@
 
 # --- Built Ins  ---
 import asyncio
-from typing import AsyncGenerator, Set
+from typing import AsyncGenerator, Set, List
 
 # --- Installed  ---
 from loguru import logger as log
@@ -31,10 +31,14 @@ class BinanceWsClient(AbstractWsClient):
         postgres_client: PostgresClient,
         redis_client: CustomRedisClient,
         settings: ExchangeSettings,
+        initial_subscriptions: List[str]
+        | None = None,  # MODIFIED: Added parameter for initial state
     ):
         super().__init__(market_definition, redis_client, postgres_client)
         self.ws_connection_url = self.market_def.ws_base_url
-        self._subscriptions: Set[str] = set()
+        self._subscriptions: Set[str] = (
+            set(initial_subscriptions) if initial_subscriptions else set()
+        )
         self._ws: websockets.WebSocketClientProtocol | None = None
         self._is_running = asyncio.Event()
         self._control_channel = f"control:{self.market_def.market_id}:subscriptions"
@@ -120,9 +124,9 @@ class BinanceWsClient(AbstractWsClient):
         stream_names = "/".join(self._subscriptions)
         if not stream_names:
             log.warning(
-                f"[{self.exchange_name}] No initial streams to subscribe to for market '{self.market_def.market_id}'. Client will be idle until commanded."
+                f"[{self.exchange_name}] No streams to subscribe to for market '{self.market_def.market_id}'. Client will be idle until commanded."
             )
-            # MODIFIED: Replace blocking wait with a simple return to allow the reconnect loop to handle the delay.
+            # Simple return to allow the reconnect loop to handle the delay.
             return
 
         url = f"{self.ws_connection_url}?streams={stream_names}"
