@@ -26,11 +26,11 @@ class DeribitTradingClient:
     """
 
     def __init__(
-        self, 
-        settings: ExchangeSettings, 
-        client_id: str, 
+        self,
+        settings: ExchangeSettings,
+        client_id: str,
         client_secret: str,
-        ):
+    ):
         self.client_id = client_id
         self.client_secret = client_secret
         self._settings = settings
@@ -48,9 +48,10 @@ class DeribitTradingClient:
 
         @wraps(func)
         async def wrapper(
-            self, 
-            *args, **kwargs,
-            ):
+            self,
+            *args,
+            **kwargs,
+        ):
             try:
                 # First attempt to execute the function
                 return await func(self, *args, **kwargs)
@@ -120,8 +121,8 @@ class DeribitTradingClient:
     # --- SINGLE, ROBUST INTERNAL REQUEST METHOD ---
 
     async def _perform_request(
-        self, 
-        method: str, 
+        self,
+        method: str,
         params: Dict[str, Any],
     ) -> Dict[str, Any]:
         """
@@ -146,8 +147,8 @@ class DeribitTradingClient:
         }
 
         async with self._session.post(
-            self._base_url, 
-            json=payload, 
+            self._base_url,
+            json=payload,
             headers=headers,
         ) as response:
             data = await response.json()
@@ -200,7 +201,7 @@ class DeribitTradingClient:
     async def get_subaccounts_details(
         self,
         currency: str,
-        ) -> Dict[str, Any]:
+    ) -> Dict[str, Any]:
         """Fetches detailed subaccount information."""
         log.info(f"[API CALL] Fetching subaccount details for currency: {currency}")
         params = {"currency": currency, "with_open_orders": True}
@@ -215,9 +216,9 @@ class DeribitTradingClient:
 
     @_ensure_authenticated
     async def create_order(
-        self, 
+        self,
         params: Dict[str, Any],
-        ) -> Dict[str, Any]:
+    ) -> Dict[str, Any]:
         """Sends a real 'create order' request to the exchange."""
         # ... (implementation is the same, but calls _perform_request) ...
         side = params.get("side")
@@ -231,7 +232,7 @@ class DeribitTradingClient:
     async def create_oto_order(
         self,
         params: Dict[str, Any],
-        ) -> Dict[str, Any]:
+    ) -> Dict[str, Any]:
         """
         Sends a request to create a paired OTO (One-Triggers-Other) order.
         """
@@ -267,9 +268,9 @@ class DeribitTradingClient:
 
     @_ensure_authenticated
     async def get_open_orders_by_currency(
-        self, 
+        self,
         currency: str,
-        ) -> Dict[str, Any]:
+    ) -> Dict[str, Any]:
         """Fetches all open orders for a given currency."""
         log.info(f"[API CALL] Fetching open orders for currency: {currency}")
 
@@ -279,9 +280,9 @@ class DeribitTradingClient:
 
     @_ensure_authenticated
     async def get_account_summary(
-        self, 
+        self,
         currency: str,
-        ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[Dict[str, Any]]:
         """Fetches account summary, including equity. Unwraps the response object."""
         log.info(f"[API CALL] Fetching account summary for currency: {currency}")
 
@@ -291,7 +292,7 @@ class DeribitTradingClient:
 
         if response and response.get("success"):
             return response.get("data")
-        
+
         # If the request failed or was unsuccessful, return None
         return None
 
@@ -320,15 +321,15 @@ class DeribitTradingClient:
             params["continuation"] = continuation
 
         return await self._perform_request(
-            ApiMethods.GET_TRANSACTION_LOG, 
+            ApiMethods.GET_TRANSACTION_LOG,
             params,
-            )
+        )
 
     @_ensure_authenticated
     async def get_user_trades_by_order(
         self,
         order_id: str,
-        ) -> Dict[str, Any]:
+    ) -> Dict[str, Any]:
         """Fetches user trades for a specific order ID."""
         log.debug(f"[API CALL] Fetching trades for order_id: {order_id}")
 
@@ -338,9 +339,9 @@ class DeribitTradingClient:
 
     @_ensure_authenticated
     async def simulate_pme(
-        self, 
+        self,
         positions: Dict[str, float],
-        ) -> Dict[str, Any]:
+    ) -> Dict[str, Any]:
         """
         Calls the private/pme/simulate endpoint to get official margin calculations.
         """
