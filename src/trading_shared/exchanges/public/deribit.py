@@ -48,7 +48,8 @@ class DeribitPublicClient(PublicExchangeClient):
         if not self._session or self._session.closed:
             raise ConnectionError("Session not established. Call connect() first.")
 
-        url = f"{self.rest_url}/api/v2/{endpoint}"
+        # MODIFICATION: Removed hardcoded '/api/v2' to prevent URL duplication.
+        url = f"{self.rest_url}/{endpoint}"
         try:
             async with self._session.get(url, params=params, timeout=20) as response:
                 response.raise_for_status()
@@ -94,8 +95,8 @@ class DeribitPublicClient(PublicExchangeClient):
             "end_timestamp": end_ts,
             "resolution": resolution,
         }
-        # This endpoint returns a dict, not a list, so we handle its result differently
-        url = f"{self.rest_url}/api/v2/public/get_tradingview_chart_data"
+        # MODIFICATION: Removed hardcoded '/api/v2' to prevent URL duplication.
+        url = f"{self.rest_url}/public/get_tradingview_chart_data"
         try:
             async with self._session.get(url, params=params, timeout=20) as response:
                 response.raise_for_status()
@@ -104,7 +105,7 @@ class DeribitPublicClient(PublicExchangeClient):
         except Exception as e:
             log.error(f"Failed to fetch OHLC from Deribit: {e}")
             return {}
-
+        
     async def get_public_trades(
         self,
         instrument: str,
