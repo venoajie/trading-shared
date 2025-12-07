@@ -20,7 +20,10 @@ class DeribitPublicClient(PublicExchangeClient):
     This client returns RAW, untransformed data from the exchange.
     """
 
-    def __init__(self, settings: ExchangeSettings):
+    def __init__(
+        self,
+        settings: ExchangeSettings,
+    ):
         super().__init__(settings)
         self._session: Optional[aiohttp.ClientSession] = None
         self.rest_url = self.settings.rest_url
@@ -42,24 +45,39 @@ class DeribitPublicClient(PublicExchangeClient):
             log.info("[DeribitPublicClient] Public aiohttp session closed.")
 
     async def _public_request(
-        self, endpoint: str, params: Optional[dict] = None
+        self,
+        endpoint: str,
+        params: Optional[dict] = None,
     ) -> Any:
         """Helper for making a public request to Deribit."""
         if not self._session or self._session.closed:
             raise ConnectionError("Session not established. Call connect() first.")
 
-        # MODIFICATION: Removed hardcoded '/api/v2' to prevent URL duplication.
-        url = f"{self.rest_url}/{endpoint}"
+        url = f"{self.rest_url}/api/v2/{endpoint}"
         try:
             async with self._session.get(url, params=params, timeout=20) as response:
                 response.raise_for_status()
                 data = await response.json()
-                return data.get("result", [])
+                # Handle dict responses correctly for OHLC.
+                if isinstance(data, dict):
+                    return data.get("result", {})
+                return data.get("result", [])  # Original behavior for lists.
+        except aiohttp.ClientResponseError as e:
+            # Log the full error context from the exception object.
+            log.error(
+                f"Failed to fetch from Deribit public endpoint {endpoint}: {e.status}, message='{e.message}', url='{e.request_info.real_url}'"
+            )
+            return [] if not endpoint.endswith("chart_data") else {}
         except Exception as e:
-            log.error(f"Failed to fetch from Deribit public endpoint {endpoint}: {e}")
-            return []
+            log.error(
+                f"An unexpected error occurred for Deribit endpoint {endpoint}: {e}"
+            )
+            return [] if not endpoint.endswith("chart_data") else {}
 
-    async def get_instruments(self, currencies: List[str]) -> List[Dict[str, Any]]:
+    async def get_instruments(
+        self,
+        currencies: List[str],
+    ) -> List[Dict[str, Any]]:
         """
         Fetches all relevant raw instruments by looping through the provided currencies.
         Returns the data without transformation.
@@ -95,17 +113,9 @@ class DeribitPublicClient(PublicExchangeClient):
             "end_timestamp": end_ts,
             "resolution": resolution,
         }
-        # MODIFICATION: Removed hardcoded '/api/v2' to prevent URL duplication.
-        url = f"{self.rest_url}/public/get_tradingview_chart_data"
-        try:
-            async with self._session.get(url, params=params, timeout=20) as response:
-                response.raise_for_status()
-                data = await response.json()
-                return data.get("result", {})
-        except Exception as e:
-            log.error(f"Failed to fetch OHLC from Deribit: {e}")
-            return {}
-        
+
+        return await self._public_request("public/get_tradingview_chart_data", params)
+
     async def get_public_trades(
         self,
         instrument: str,
@@ -160,7 +170,10 @@ class DeribitPublicClient(PublicExchangeClient):
         log.info(f"Fetched {len(all_trades)} public trades for {instrument}")
         return all_trades
 
-    def _transform_instrument(self, raw_instrument: Dict[str, Any]) -> Dict[str, Any]:
+    def _transform_instrument(
+        self,
+        raw_instrument: Dict[str, Any],
+    ) -> Dict[str, Any]:
         """Transforms a single raw Deribit instrument into our canonical format."""
         exp_ts_ms = raw_instrument.get("expiration_timestamp")
         expiration_timestamp = (

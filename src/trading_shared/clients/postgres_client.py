@@ -146,8 +146,10 @@ class PostgresClient:
         return await self._execute_resiliently(
             lambda conn: conn.fetchval(query, *args), f"fetchval_{command_name}"
         )
-        
-    async def bulk_upsert_instruments(self, instruments: List[Dict[str, Any]], exchange_name: str):
+
+    async def bulk_upsert_instruments(
+        self, instruments: List[Dict[str, Any]], exchange_name: str
+    ):
         """
         Performs a bulk upsert of instrument data by passing an array of JSONB
         objects to the legacy database function.
@@ -157,7 +159,7 @@ class PostgresClient:
 
         # The legacy function expects the exchange name to be inside the JSON payload.
         for inst in instruments:
-            inst['exchange'] = exchange_name
+            inst["exchange"] = exchange_name
 
         async def command(conn: asyncpg.Connection):
             # The 'instruments' list of dicts is automatically encoded to JSONB[].
@@ -167,8 +169,10 @@ class PostgresClient:
             )
 
         await self._execute_resiliently(command, "bulk_upsert_instruments")
-        log.info(f"Successfully bulk-upserted {len(instruments)} instruments for '{exchange_name}'.")
-        
+        log.info(
+            f"Successfully bulk-upserted {len(instruments)} instruments for '{exchange_name}'."
+        )
+
     async def bulk_upsert_ohlc(self, candles: list[dict[str, Any]]):
         if not candles:
             return
@@ -270,7 +274,6 @@ class PostgresClient:
         except ValueError as e:
             raise ValueError(f"Unknown resolution format: {resolution}") from e
 
-
     async def fetch_latest_ohlc_timestamp(
         self,
         exchange_name: str,
@@ -285,12 +288,14 @@ class PostgresClient:
             SELECT MAX(tick) AS latest_tick FROM ohlc
             WHERE exchange = $1 AND instrument_name = $2 AND resolution = $3
         """
-        
+
         # This uses the generic, resilient fetchrow method already in the class
-        result = await self.fetchrow(query, exchange_name, instrument_name, resolution_td)
-        
-        if result and result['latest_tick']:
-            return result['latest_tick']
+        result = await self.fetchrow(
+            query, exchange_name, instrument_name, resolution_td
+        )
+
+        if result and result["latest_tick"]:
+            return result["latest_tick"]
         return None
 
     def _prepare_ohlc_record(
