@@ -1,9 +1,9 @@
 # src/shared_exchange_clients/public/client_map.py
 
-from shared_exchange_clients.public.deribit_client import DeribitJanitorClient
-from shared_exchange_clients.public.binance_client import BinanceJanitorClient
+from trading_shared.exchanges.public.deribit import DeribitPublicClient
+from trading_shared.exchanges.public.binance import BinancePublicClient
 
 CLIENT_MAP = {
-    "deribit": DeribitJanitorClient,
-    "binance": BinanceJanitorClient,
+    "deribit": DeribitPublicClient,
+    "binance": BinancePublicClient,
 }
