@@ -191,6 +191,11 @@ class PostgresClient:
 
         return await self._execute_resiliently(command, "fetch_all_instruments")
 
+    async def fetch_instruments_by_exchange(self, exchange_name: str) -> list[asyncpg.Record]:
+        """Fetches all instrument definitions for a specific exchange."""
+        query = "SELECT * FROM v_instruments WHERE exchange = $1"
+        return await self.fetch(query, exchange_name)
+    
     async def fetch_active_trades(
         self, user_id: str | None = None
     ) -> list[asyncpg.Record]:
