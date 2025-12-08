@@ -34,6 +34,7 @@ class DeribitTradingClient:
         self.client_id = client_id
         self.client_secret = client_secret
         self._settings = settings
+        self.exchange_name = "deribit"
         self._session: Optional[aiohttp.ClientSession] = None
         self._base_url = "https://www.deribit.com/api/v2"
         self._access_token: Optional[str] = None
