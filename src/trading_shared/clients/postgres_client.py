@@ -76,7 +76,7 @@ class PostgresClient:
             log.info("PostgreSQL connection pool is not available. Creating new pool.")
 
             try:
-                # [FIXED] Aligned pool size with best practices for PgBouncer.
+                # Aligned pool size with best practices for PgBouncer.
                 self._pool = await asyncpg.create_pool(
                     dsn=self.dsn,
                     min_size=1,
@@ -97,7 +97,10 @@ class PostgresClient:
                 self._pool = None
                 log.info("PostgreSQL connection pool closed.")
 
-    async def _setup_json_codec(self, connection: asyncpg.Connection):
+    async def _setup_json_codec(
+        self,
+        connection: asyncpg.Connection,
+    ):
         for json_type in ["jsonb", "json"]:
             await connection.set_type_codec(
                 json_type,
@@ -108,7 +111,11 @@ class PostgresClient:
 
     # --- START OF PUBLIC API METHODS ---
 
-    async def execute(self, query: str, *args: Any) -> int:
+    async def execute(
+        self,
+        query: str,
+        *args: Any,
+    ) -> int:
         """
         Public: Executes a command that does not return rows (e.g., INSERT, UPDATE, DELETE).
         Returns the number of rows affected.
@@ -126,21 +133,33 @@ class PostgresClient:
 
         return await self._execute_resiliently(command, command_name)
 
-    async def fetch(self, query: str, *args: Any) -> List[asyncpg.Record]:
+    async def fetch(
+        self,
+        query: str,
+        *args: Any,
+    ) -> List[asyncpg.Record]:
         """Public: Fetches multiple rows from the database."""
         command_name = query.strip().split()[0].upper()
         return await self._execute_resiliently(
             lambda conn: conn.fetch(query, *args), f"fetch_{command_name}"
         )
 
-    async def fetchrow(self, query: str, *args: Any) -> Optional[asyncpg.Record]:
+    async def fetchrow(
+        self,
+        query: str,
+        *args: Any,
+    ) -> Optional[asyncpg.Record]:
         """Public: Fetches a single row from the database."""
         command_name = query.strip().split()[0].upper()
         return await self._execute_resiliently(
             lambda conn: conn.fetchrow(query, *args), f"fetchrow_{command_name}"
         )
 
-    async def fetchval(self, query: str, *args: Any) -> Any:
+    async def fetchval(
+        self,
+        query: str,
+        *args: Any,
+    ) -> Any:
         """Public: Fetches a single scalar value from the database."""
         command_name = query.strip().split()[0].upper()
         return await self._execute_resiliently(
@@ -148,7 +167,9 @@ class PostgresClient:
         )
 
     async def bulk_upsert_instruments(
-        self, instruments: List[Dict[str, Any]], exchange_name: str
+        self,
+        instruments: List[Dict[str, Any]],
+        exchange_name: str,
     ):
         """
         Performs a bulk upsert of instrument data by passing an array of JSONB
@@ -173,7 +194,10 @@ class PostgresClient:
             f"Successfully bulk-upserted {len(instruments)} instruments for '{exchange_name}'."
         )
 
-    async def bulk_upsert_ohlc(self, candles: list[dict[str, Any]]):
+    async def bulk_upsert_ohlc(
+        self,
+        candles: list[dict[str, Any]],
+    ):
         if not candles:
             return
         records = [self._prepare_ohlc_record(c) for c in candles]
@@ -191,13 +215,17 @@ class PostgresClient:
 
         return await self._execute_resiliently(command, "fetch_all_instruments")
 
-    async def fetch_instruments_by_exchange(self, exchange_name: str) -> list[asyncpg.Record]:
+    async def fetch_instruments_by_exchange(
+        self,
+        exchange_name: str,
+    ) -> list[asyncpg.Record]:
         """Fetches all instrument definitions for a specific exchange."""
         query = "SELECT * FROM v_instruments WHERE exchange = $1"
         return await self.fetch(query, exchange_name)
-    
+
     async def fetch_active_trades(
-        self, user_id: str | None = None
+        self,
+        user_id: str | None = None,
     ) -> list[asyncpg.Record]:
         async def command(conn: asyncpg.Connection):
             query = "SELECT * FROM v_active_trades"
