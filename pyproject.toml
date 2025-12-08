@@ -2,7 +2,7 @@
 
 [project]
 name = "trading-shared"
-version = "0.5.0"
+version = "0.5.1"
 description = "Consolidated shared clients and utilities for the trading platform."
 
 dependencies = [
@@ -12,7 +12,7 @@ dependencies = [
     "orjson==3.11.4",
     "redis==7.1.0",
     "websockets==15.0.1",  
-    "trading-engine-core @ git+https://github.com/venoajie/trading-engine-core.git@v0.2.2"
+    "trading-engine-core @ git+https://github.com/venoajie/trading-engine-core.git@v0.2.3"
 ]
 [build-system]
 requires = ["setuptools"]
