@@ -45,9 +45,9 @@ class DeribitWsClient(AbstractWsClient):
         self.instrument_names: List[str] = []
 
     async def _send_json(self, data: dict):
-        if self.websocket_client and not self.websocket_client.closed:
+        if self.websocket_client and self.websocket_client.open:
             await self.websocket_client.send(json.dumps(data))
-
+            
     async def _load_instruments(self):
         if not self.instrument_names:
             records = await self.postgres_client.fetch_all_instruments()
