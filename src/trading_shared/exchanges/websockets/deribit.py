@@ -45,9 +45,19 @@ class DeribitWsClient(AbstractWsClient):
         self.instrument_names: List[str] = []
 
     async def _send_json(self, data: dict):
-        if self.websocket_client and self.websocket_client.open:
+        """
+        Sends a JSON payload to the WebSocket.
+        NOTE: This method assumes it is called when the connection is believed to
+        be active. It does not perform its own state checking. Connection errors
+        (e.g., ConnectionClosed) are expected to be handled by the calling method,
+        such as the main loop in `process_messages`.
+        """
+        if self.websocket_client:
+            # The `websockets` v10+ API will raise a ConnectionClosed exception
+            # on `send` if the connection is not active, which is handled by
+            # the `try...except` block in `process_messages`.
             await self.websocket_client.send(json.dumps(data))
-            
+                        
     async def _load_instruments(self):
         if not self.instrument_names:
             records = await self.postgres_client.fetch_all_instruments()
