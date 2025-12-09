@@ -35,6 +35,13 @@ class CustomRedisClient:
         self._write_sem = asyncio.Semaphore(4)
         self._lock = asyncio.Lock()
 
+    async def connect(self):
+        """
+        Ensures the connection pool is initialized. This is the standard
+        public method for explicit connection setup.
+        """
+        await self._get_pool()
+        
     async def __aenter__(self):
         """Allows the client to be used as an async context manager."""
         await self.get_pool()  # Ensure connection is established on entry
@@ -56,14 +63,11 @@ class CustomRedisClient:
                     f"A non-critical error occurred while closing stale Redis pool: {e}"
                 )
 
-    async def get_pool(self) -> aioredis.Redis:
+    async def _get_pool(self) -> aioredis.Redis:
         async with self._lock:
-            # CORRECTED: Use self._pool
             if self._pool:
                 try:
-                    # CORRECTED: Use self._pool
                     await asyncio.wait_for(self._pool.ping(), timeout=0.5)
-                    # CORRECTED: Use self._pool
                     return self._pool
                 except (TimeoutError, redis_exceptions.ConnectionError):
                     log.warning("Existing Redis pool is stale. Reconnecting.")
@@ -75,11 +79,9 @@ class CustomRedisClient:
                     raise ConnectionError("Redis unavailable - circuit breaker open")
                 self._circuit_open = False
 
-            # CORRECTED: Access settings via self._settings
             redis_config = self._settings
             for attempt in range(5):
                 try:
-                    # CORRECTED: Assign to self._pool
                     self._pool = aioredis.from_url(
                         redis_config.url,
                         password=redis_config.password,
@@ -95,7 +97,6 @@ class CustomRedisClient:
                         encoding="utf-8",
                         decode_responses=False,
                     )
-                    # CORRECTED: Use self._pool
                     await asyncio.wait_for(self._pool.ping(), timeout=3)
                     self._reconnect_attempts = 0
                     log.info("Redis connection established")
@@ -114,8 +115,13 @@ class CustomRedisClient:
                 f"Redis connection failed after 5 attempts: {last_error}"
             )
 
+
     async def close(self):
-        async with self._lock:  # Protect against race conditions with get_pool
+        """
+        Gracefully closes the active Redis connection pool. This method is
+        automatically called when exiting an 'async with' block.
+        """
+        async with self._lock:
             pool_to_close = self._pool
             self._pool = None
             if pool_to_close:
@@ -166,7 +172,8 @@ class CustomRedisClient:
         last_exception: Exception | None = None
         for attempt in range(3):
             try:
-                pool = await self.get_pool()
+                # CORRECTED: Call the internal _get_pool method
+                pool = await self._get_pool()
                 return await func(pool)
             except (
                 redis_exceptions.ConnectionError,
