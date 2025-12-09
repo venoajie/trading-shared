@@ -5,13 +5,13 @@ import asyncio
 import json
 import random
 import time
-from typing import AsyncGenerator, List, Optional, Union
+from typing import AsyncGenerator, List, Optional
 
 # --- Installed  ---
 from loguru import logger as log
 import orjson
 import websockets
-from pydantic import SecretStr
+from pydantic import SecretStr # Import SecretStr for type hinting
 
 # --- Local Application Imports ---
 from ...clients.redis_client import CustomRedisClient
@@ -41,25 +41,19 @@ class DeribitWsClient(AbstractWsClient):
         if not self.settings.client_id or not self.settings.client_secret:
             raise ValueError("Deribit client_id and client_secret must be configured.")
             
-        # Store the credentials without making assumptions about their type yet.
-        self._client_id: Union[SecretStr, str] = self.settings.client_id
-        self._client_secret: Union[SecretStr, str] = self.settings.client_secret
+        # These will hold the SecretStr objects
+        self._client_id: SecretStr = self.settings.client_id
+        self._client_secret: SecretStr = self.settings.client_secret
         
         self.websocket_client: Optional[websockets.WebSocketClientProtocol] = None
         self.instrument_names: List[str] = []
-
-    # CORRECTED: Create a resilient helper to get the raw string value.
-    def _get_secret_value(self, secret: Union[SecretStr, str]) -> str:
-        """Safely gets the string value from a SecretStr or a plain str."""
-        if isinstance(secret, SecretStr):
-            return secret.get_secret_value()
-        return secret
 
     async def _send_json(self, data: dict):
         if self.websocket_client:
             await self.websocket_client.send(json.dumps(data))
 
     async def _load_instruments(self) -> bool:
+        """Loads instruments from DB. Returns True on success, False on failure."""
         if not self.instrument_names:
             try:
                 records = await self.postgres_client.fetch_instruments_by_exchange(self.exchange_name)
@@ -111,18 +105,19 @@ class DeribitWsClient(AbstractWsClient):
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
         if not await self._load_instruments():
             log.error(f"[{self.exchange_name}] Instrument loading failed. Aborting connection attempt.")
+            # Yield nothing and return, allowing the reconnect loop to handle backoff.
             return
 
         AUTH_ID = 9929
-        # CORRECTED: Use the resilient helper to handle both str and SecretStr.
+        # CORRECTED: Unwrap SecretStr objects to plain strings for serialization.
         auth_msg = {
             "jsonrpc": "2.0",
             "id": AUTH_ID,
             "method": "public/auth",
             "params": {
                 "grant_type": "client_credentials",
-                "client_id": self._get_secret_value(self._client_id),
-                "client_secret": self._get_secret_value(self._client_secret),
+                "client_id": self._client_id.get_secret_value(),
+                "client_secret": self._client_secret.get_secret_value(),
             },
         }
 
@@ -143,7 +138,7 @@ class DeribitWsClient(AbstractWsClient):
                         if data.get("id") == AUTH_ID:
                             if "error" in data:
                                 log.error(f"[{self.exchange_name}] Authentication failed: {data['error']}")
-                                return
+                                return # Abort on auth failure
                             log.info(f"[{self.exchange_name}] Authentication successful")
                             is_authenticated = True
                             await self._subscribe()
@@ -177,10 +172,11 @@ class DeribitWsClient(AbstractWsClient):
                     if not self._is_running.is_set():
                         break
                     
-                    reconnect_attempts = 0
+                    reconnect_attempts = 0 # Reset on successful message
                     batch.append(message.model_dump(exclude_none=True))
                     
                     if len(batch) >= 100:
+                        # CORRECTED: Implement a resilient batch flush to prevent data loss.
                         is_flushed = False
                         while not is_flushed:
                             try:
@@ -193,10 +189,10 @@ class DeribitWsClient(AbstractWsClient):
                                 await asyncio.sleep(5)
                                 if not self._is_running.is_set():
                                     log.warning(f"[{self.exchange_name}] Shutdown initiated during Redis retry. Discarding batch.")
-                                    break
+                                    break # Exit inner loop on shutdown
 
             except asyncio.CancelledError:
-                break
+                break # Normal shutdown
             except (websockets.exceptions.ConnectionClosed, ConnectionRefusedError, asyncio.TimeoutError) as e:
                 log.warning(f"[{self.exchange_name}] WebSocket connection error: {type(e).__name__}. Will reconnect.")
             except Exception:
