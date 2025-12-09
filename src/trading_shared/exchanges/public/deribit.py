@@ -17,32 +17,22 @@ from .base import PublicExchangeClient
 class DeribitPublicClient(PublicExchangeClient):
     """
     An API client for public, non-authenticated Deribit endpoints.
-    This client returns RAW, untransformed data from the exchange.
     """
 
     def __init__(
         self,
         settings: ExchangeSettings,
+        http_session: aiohttp.ClientSession,
     ):
-        super().__init__(settings)
-        self._session: Optional[aiohttp.ClientSession] = None
-        self.rest_url = self.settings.rest_url
-        if not self.rest_url:
-            raise ValueError(
-                "Deribit REST API URL ('rest_url') not configured in ExchangeSettings."
-            )
+        super().__init__(settings, http_session)
 
     async def connect(self):
-        """Establishes the client session."""
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession()
-            log.info("[DeribitPublicClient] Public aiohttp session established.")
+        """The shared session is managed externally. This method is a no-op."""
+        pass
 
     async def close(self):
-        """Closes the client session."""
-        if self._session and not self._session.closed:
-            await self._session.close()
-            log.info("[DeribitPublicClient] Public aiohttp session closed.")
+        """The shared session is managed externally. This method is a no-op."""
+        pass
 
     async def _public_request(
         self,
@@ -50,22 +40,20 @@ class DeribitPublicClient(PublicExchangeClient):
         params: Optional[dict] = None,
     ) -> Any:
         """Helper for making a public request to Deribit."""
-        if not self._session or self._session.closed:
-            raise ConnectionError("Session not established. Call connect() first.")
 
-        url = f"{self.rest_url}/api/v2/{endpoint}"
+        url = f"{self.base_url}/api/v2/{endpoint}"
         try:
-            async with self._session.get(url, params=params, timeout=20) as response:
+            # The get() call will raise ClientError if the session is closed.
+            async with self.http_session.get(url, params=params, timeout=20) as response:
                 response.raise_for_status()
                 data = await response.json()
-                # Handle dict responses correctly for OHLC.
                 if isinstance(data, dict):
                     return data.get("result", {})
-                return data.get("result", [])  # Original behavior for lists.
-        except aiohttp.ClientResponseError as e:
-            # Log the full error context from the exception object.
+                return data.get("result", [])
+        except aiohttp.ClientError as e:
+            # More specific catch for aiohttp-related issues, including a closed session.
             log.error(
-                f"Failed to fetch from Deribit public endpoint {endpoint}: {e.status}, message='{e.message}', url='{e.request_info.real_url}'"
+                f"Failed to fetch from Deribit public endpoint {endpoint}: {e}"
             )
             return [] if not endpoint.endswith("chart_data") else {}
         except Exception as e:
@@ -73,7 +61,7 @@ class DeribitPublicClient(PublicExchangeClient):
                 f"An unexpected error occurred for Deribit endpoint {endpoint}: {e}"
             )
             return [] if not endpoint.endswith("chart_data") else {}
-
+        
     async def get_instruments(
         self,
         currencies: List[str],

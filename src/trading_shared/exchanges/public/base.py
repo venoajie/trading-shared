@@ -4,6 +4,9 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any
 
+# --- Installed ---
+import aiohttp 
+
 # --- Shared Library Imports ---
 from ...config.models import ExchangeSettings
 
@@ -14,17 +17,28 @@ class PublicExchangeClient(ABC):
     This contract is used by services like Janitor and Backfill.
     """
 
-    def __init__(self, settings: ExchangeSettings):
+    def __init__(self, settings: ExchangeSettings, http_session: aiohttp.ClientSession):
         self.settings = settings
+        self.http_session = http_session
+        self.base_url = settings.rest_url
+        if not self.base_url:
+            raise ValueError(f"REST URL for {type(self).__name__} is not configured.")
 
     @abstractmethod
     async def connect(self):
-        """Establishes the client session."""
+        """
+        A placeholder for any initial connection or setup logic.
+        This method SHOULD NOT create a new session.
+        """
         pass
 
     @abstractmethod
     async def close(self):
-        """Closes the client session."""
+        """
+        A placeholder for any cleanup logic.
+        This method MUST NOT close the shared http_session, as its lifecycle
+        is managed by the service that created it.
+        """
         pass
 
     @abstractmethod
