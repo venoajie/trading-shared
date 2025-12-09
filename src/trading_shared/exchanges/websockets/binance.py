@@ -57,8 +57,6 @@ class BinanceWsClient(AbstractWsClient):
             return
 
         request_id = int(asyncio.get_running_loop().time() * 1000)
-
-        request_id = int(asyncio.get_running_loop().time() * 1000)
         payload = {"method": method, "params": params, "id": request_id}
         log.info(f"Sending request to Binance WS: {payload}")
         await self._ws.send(orjson.dumps(payload))

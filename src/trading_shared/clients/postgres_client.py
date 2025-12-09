@@ -29,6 +29,15 @@ class PostgresClient:
         self.dsn = self.postgres_settings.dsn if self.postgres_settings else None
         self._pool: Optional[asyncpg.Pool] = None
 
+    async def __aenter__(self):
+        """Allows the client to be used as an async context manager."""
+        await self.get_pool()  # Ensure connection is established on entry
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Ensures the connection pool is closed on exit."""
+        await self.close()
+
     async def _execute_resiliently(
         self,
         command_func: Callable[[asyncpg.Connection], Awaitable[T]],
@@ -91,12 +100,19 @@ class PostgresClient:
                 raise ConnectionError("Fatal: Could not create PostgreSQL pool.") from e
 
     async def close_pool(self):
-        async with self._lock:
-            if self._pool and not self._pool._closed:
-                await self._pool.close()
-                self._pool = None
-                log.info("PostgreSQL connection pool closed.")
+        """Closes all connections in the pool."""
+        if self._pool:
+            await self._pool.close()
+            log.info("PostgreSQL connection pool closed.")
+            self._pool = None
 
+    async def close(self):
+        """
+        Standardized alias for close_pool() to conform to the
+        resource manager's expected interface.
+        """
+        await self.close_pool()
+        
     async def _setup_json_codec(
         self,
         connection: asyncpg.Connection,

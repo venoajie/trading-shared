@@ -35,6 +35,25 @@ class CustomRedisClient:
         self._write_sem = asyncio.Semaphore(4)
         self._lock = asyncio.Lock()
 
+    async def __aenter__(self):
+        """Allows the client to be used as an async context manager."""
+        await self.get_pool()  # Ensure connection is established on entry
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Ensures the connection pool is closed on exit."""
+        await self.close()
+        
+    async def _safe_close_pool(self):
+        """Safely closes the current pool, ignoring errors."""
+        pool_to_close = self._pool
+        self._pool = None  # Immediately prevent reuse
+        if pool_to_close:
+            try:
+                await pool_to_close.close()
+            except Exception as e:
+                log.warning(f"A non-critical error occurred while closing stale Redis pool: {e}")
+                
     async def get_pool(self) -> aioredis.Redis:
         async with self._lock:
             # CORRECTED: Use self._pool
@@ -78,7 +97,6 @@ class CustomRedisClient:
                     await asyncio.wait_for(self._pool.ping(), timeout=3)
                     self._reconnect_attempts = 0
                     log.info("Redis connection established")
-                    # CORRECTED: Use self._pool
                     return self._pool
                 except Exception as e:
                     log.warning(f"Connection failed on attempt {attempt + 1}: {e}")
@@ -94,18 +112,18 @@ class CustomRedisClient:
                 f"Redis connection failed after 5 attempts: {last_error}"
             )
 
-    async def _safe_close_pool(self):
-        # CORRECTED: Use self._pool
-        pool_to_close = self._pool
-        # CORRECTED: Use self._pool
-        self._pool = None
-        if pool_to_close:
-            try:
-                await pool_to_close.close()
-                log.info("Redis connection pool closed.")
-            except Exception as e:
-                log.error(f"Error closing Redis pool: {e}")
-
+    async def close(self):
+        async with self._lock: # Protect against race conditions with get_pool
+            pool_to_close = self._pool
+            self._pool = None
+            if pool_to_close:
+                try:
+                    await pool_to_close.close()
+                    log.info("Redis connection pool closed.")
+                except Exception as e:
+                    log.warning(f"A non-critical error occurred while closing Redis pool: {e}")
+                    
+                
     async def _execute_resiliently(
         self,
         func: Callable[[aioredis.Redis], Awaitable[T]],
@@ -223,15 +241,15 @@ class CustomRedisClient:
                         await pipe.execute()
 
                 await self._execute_resiliently(command, "pipeline.execute(xadd)")
-            except (ConnectionError, redis_exceptions.ResponseError) as e:
+            # Only catch the final, definitive ConnectionError from the resilient wrapper.
+            except ConnectionError as e:
                 log.error(
                     f"Final attempt to send chunk failed. Moving to DLQ stream. Error: {e}"
                 )
                 await self.xadd_to_dlq(stream_name, chunk)
-                raise ConnectionError(
-                    "Failed to write to Redis stream after retries."
-                ) from e
-
+                # Re-raise to signal that the write operation ultimately failed.
+                raise
+            
     async def xadd_to_dlq(
         self,
         original_stream_name: str,
@@ -352,7 +370,7 @@ class CustomRedisClient:
             )
         except redis_exceptions.ResponseError as e:
             log.warning(f"Could not run XAUTOCLAIM on '{stream_name}': {e}.")
-            return None, []
+            return b'0-0', [] # Return a valid, non-operational start_id
         except Exception as e:
             log.error(f"An unexpected error occurred during XAUTOCLAIM: {e}")
             raise
@@ -366,19 +384,20 @@ class CustomRedisClient:
             payload = await self._execute_resiliently(
                 lambda pool: pool.hget(key, "payload"), "hget"
             )
-            if payload:
-                return orjson.loads(payload)
-            return None
-        except ConnectionError as e:
-            raise ConnectionError(
-                f"Redis connection failed during ticker read for {instrument_name}"
-            ) from e
-        except Exception as e:
+            if not payload:
+                return None
+            return orjson.loads(payload)
+        # ConnectionError is already handled and raised by _execute_resiliently.
+        # It should be caught by the service logic, not here.
+        except orjson.JSONDecodeError as e:
             log.error(
-                f"An unexpected error occurred getting ticker '{instrument_name}': {e}"
+                f"Failed to decode ticker data for '{instrument_name}'. "
+                f"Possible data corruption in Redis key '{key}'. Error: {e}"
             )
+            # Re-raise as a more specific application-level exception or return None,
+            # but do not swallow other unexpected errors.
             return None
-
+        
     async def get_system_state(self) -> str:
         try:
             state = await self._execute_resiliently(
@@ -525,3 +544,14 @@ class CustomRedisClient:
             )
 
         await self._execute_resiliently(command, f"XADD {name}")
+        
+        
+    async def lpush(self, key: str, value: str | bytes):
+        return await self._execute_resiliently(
+            lambda pool: pool.lpush(key, value), f"LPUSH {key}"
+        )
+
+    async def brpop(self, key: str, timeout: int) -> tuple[bytes, bytes] | None:
+        return await self._execute_resiliently(
+            lambda pool: pool.brpop(key, timeout=timeout), f"BRPOP {key}"
+        )
