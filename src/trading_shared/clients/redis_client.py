@@ -28,11 +28,11 @@ class CustomRedisClient:
 
     def __init__(self, settings: RedisSettings):
         self._settings = settings
-        self._pool: Optional[aioredis.Redis] = None  # Correctly named with underscore
+        self._pool: Optional[aioredis.Redis] = None
         self._circuit_open = False
         self._last_failure = 0
         self._reconnect_attempts = 0
-        self._write_sem = asyncio.Semaphore(4)
+        self._write_sem = asyncio.Semaphore(self._settings.write_concurrency_limit)
         self._lock = asyncio.Lock()
 
     async def connect(self):
@@ -44,7 +44,7 @@ class CustomRedisClient:
         
     async def __aenter__(self):
         """Allows the client to be used as an async context manager."""
-        await self.get_pool()  # Ensure connection is established on entry
+        await self._get_pool()  # Ensure connection is established on entry
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -65,13 +65,10 @@ class CustomRedisClient:
 
     async def _get_pool(self) -> aioredis.Redis:
         async with self._lock:
+            # SIMPLIFIED: If pool exists, assume it's good. Let the resilient
+            # executor handle failures reactively.
             if self._pool:
-                try:
-                    await asyncio.wait_for(self._pool.ping(), timeout=0.5)
-                    return self._pool
-                except (TimeoutError, redis_exceptions.ConnectionError):
-                    log.warning("Existing Redis pool is stale. Reconnecting.")
-                    await self._safe_close_pool()
+                return self._pool
 
             if self._circuit_open:
                 cooldown = min(60, 5 * (2**self._reconnect_attempts))
@@ -82,9 +79,15 @@ class CustomRedisClient:
             redis_config = self._settings
             for attempt in range(5):
                 try:
+                    password_value = (
+                        redis_config.password.get_secret_value()
+                        if redis_config.password
+                        else None
+                    )
+
                     self._pool = aioredis.from_url(
                         redis_config.url,
-                        password=redis_config.password,
+                        password=password_value,
                         db=int(redis_config.db or 0),
                         socket_connect_timeout=2,
                         socket_keepalive=True,
@@ -101,7 +104,12 @@ class CustomRedisClient:
                     self._reconnect_attempts = 0
                     log.info("Redis connection established")
                     return self._pool
-                except Exception as e:
+                except (
+                    redis_exceptions.ConnectionError,
+                    redis_exceptions.TimeoutError,
+                    TimeoutError,
+                    socket.gaierror,
+                ) as e:
                     log.warning(f"Connection failed on attempt {attempt + 1}: {e}")
                     await self._safe_close_pool()
                     if attempt < 4:

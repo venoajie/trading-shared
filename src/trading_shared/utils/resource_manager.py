@@ -12,45 +12,50 @@ from loguru import logger as log
 @asynccontextmanager
 async def managed_resources(resources: Iterable[Any]) -> AsyncGenerator[None, None]:
     """
-    An async context manager that guarantees the graceful cleanup of any
-    resource with an awaitable 'close' method.
+    An async context manager that guarantees the graceful cleanup of resources.
 
-    This manager is designed to be dependency-agnostic. It does not instantiate
-    resources; it only ensures the `close()` method of pre-instantiated
-    objects is called upon exiting the `async with` block, regardless of
-    whether the block exits cleanly or via an exception.
+    This manager is designed to be dependency-agnostic. It ensures that resources
+    are closed upon exiting the `async with` block, regardless of whether the
+    block exits cleanly or via an exception.
+
+    Cleanup Protocol:
+    1. It first checks for a standard `__aexit__` method.
+    2. If not found, it falls back to checking for an awaitable `close()` method.
+    3. Resources are closed in the reverse order they are provided.
 
     Args:
         resources: An iterable of instantiated resource objects (e.g., clients).
-                   Each object is checked for an awaitable `close()` method,
-                   which will be called during cleanup.
 
     Example:
-        clients = [PostgresClient(), CustomRedisClient(), WsClient()]
-        async with managed_resources(clients):
-            # ... service logic using the clients ...
-            pass
-        # At this point, .close() has been awaited on all clients.
+        service = MyService(db_client)
+        # Service is listed first, so it will be closed last on entry, first on exit.
+        all_resources = [service, db_client, http_session]
+        async with managed_resources(all_resources):
+            await service.start()
+            ...
     """
-    # Convert to a list immediately to avoid consuming the iterable.
     resource_list: List[Any] = list(resources)
     try:
-        # The 'yield' passes control back to the 'async with' block.
-        # The resources are already instantiated and available in the calling scope.
         yield
     finally:
-        log.info(f"Closing {len(resource_list)} managed resources...")
-        # --- RELEASE (Guaranteed Execution) ---
-        for resource in resource_list:
-            # Check if the resource has a callable 'close' method to avoid errors.
-            if hasattr(resource, "close") and callable(getattr(resource, "close")):
-                resource_name = type(resource).__name__
-                try:
-                    # Await the close method to perform cleanup.
+        log.info(f"Closing {len(resource_list)} managed resources in reverse order...")
+        # Iterate in reverse for safe, dependency-aware shutdown.
+        for resource in reversed(resource_list):
+            resource_name = type(resource).__name__
+            try:
+                # Prioritize the standard __aexit__ protocol.
+                if hasattr(resource, "__aexit__") and callable(getattr(resource, "__aexit__")):
+                    await resource.__aexit__(None, None, None)
+                # Fallback to the .close() convention.
+                elif hasattr(resource, "close") and callable(getattr(resource, "close")):
                     await resource.close()
-                except Exception:
-                    # Log but do not re-raise. This ensures that a failure in closing
-                    # one resource does not prevent subsequent resources from being closed.
-                    log.exception(
-                        f"A non-critical error occurred while closing resource: '{resource_name}'"
-                    )
+                # If no cleanup method is found, do nothing.
+                else:
+                    log.trace(f"Resource '{resource_name}' has no cleanup method (__aexit__ or close). Skipping.")
+
+            except Exception:
+                # Log but do not re-raise. Ensures a failure in closing one
+                # resource does not prevent others from being closed.
+                log.exception(
+                    f"A non-critical error occurred while closing resource: '{resource_name}'"
+                )

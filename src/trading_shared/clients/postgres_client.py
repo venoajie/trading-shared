@@ -27,11 +27,10 @@ class PostgresClient:
     def __init__(self, settings: PostgresSettings | None = None):
         self.postgres_settings = settings
         self.dsn = self.postgres_settings.dsn if self.postgres_settings else None
-        self._pool: Optional[asyncpg.Pool] = None
 
     async def __aenter__(self):
         """Allows the client to be used as an async context manager."""
-        await self.get_pool()  # Ensure connection is established on entry
+        await self.ensure_pool_is_ready()  # Ensure connection is established on entry
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -49,7 +48,7 @@ class PostgresClient:
         last_exception: Exception | None = None
         for attempt in range(3):
             try:
-                pool = await self.start_pool()
+                pool = await self.ensure_pool_is_ready()
                 async with pool.acquire() as conn:
                     return await command_func(conn)
             except (
@@ -72,7 +71,7 @@ class PostgresClient:
             f"Failed to execute Postgres command '{command_name_for_logging}' after retries."
         ) from last_exception
 
-    async def start_pool(self) -> asyncpg.Pool:
+    async def ensure_pool_is_ready(self) -> asyncpg.Pool:
         async with self._lock:
             if self._pool is not None and not self._pool._closed:
                 return self._pool
@@ -194,15 +193,16 @@ class PostgresClient:
         if not instruments:
             return
 
-        # The legacy function expects the exchange name to be inside the JSON payload.
-        for inst in instruments:
-            inst["exchange"] = exchange_name
-
+        # Create a new list to avoid side effects.
+        instruments_with_exchange = [
+            {**inst, "exchange": exchange_name} for inst in instruments
+        ]
+        
         async def command(conn: asyncpg.Connection):
             # The 'instruments' list of dicts is automatically encoded to JSONB[].
             await conn.execute(
                 "SELECT bulk_upsert_instruments($1::jsonb[])",
-                instruments,
+                instruments_with_exchange,
             )
 
         await self._execute_resiliently(command, "bulk_upsert_instruments")

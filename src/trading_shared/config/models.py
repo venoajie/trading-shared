@@ -37,8 +37,8 @@ class PostgresSettings(BaseModel):
 class ExchangeSettings(BaseModel):
     # API keys are now optional, allowing this model to be used
     # for both public and private clients.
-    client_id: Optional[SecretStr] = None
-    client_secret: Optional[str] = None
+    client_id: Optional[str] = None
+    client_secret: Optional[SecretStr] = None
 
     # WebSocket and REST URLs
     ws_url: Optional[str] = None
