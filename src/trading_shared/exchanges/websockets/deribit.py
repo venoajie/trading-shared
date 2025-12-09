@@ -148,9 +148,13 @@ class DeribitWsClient(AbstractWsClient):
                     if not is_authenticated:
                         if data.get("id") == AUTH_ID:
                             if "error" in data:
-                                log.error(f"[{self.exchange_name}] Authentication failed: {data['error']}")
+                                log.error(
+                                    f"[{self.exchange_name}] Authentication failed: {data['error']}"
+                                )
                                 return
-                            log.info(f"[{self.exchange_name}] Authentication successful")
+                            log.info(
+                                f"[{self.exchange_name}] Authentication successful"
+                            )
                             is_authenticated = True
                             await self._subscribe()
                         continue
@@ -159,7 +163,11 @@ class DeribitWsClient(AbstractWsClient):
                         continue
 
                     params = data.get("params")
-                    if isinstance(params, dict) and "channel" in params and "data" in params:
+                    if (
+                        isinstance(params, dict)
+                        and "channel" in params
+                        and "data" in params
+                    ):
                         yield StreamMessage(
                             exchange=self.exchange_name,
                             channel=params["channel"],
@@ -183,18 +191,23 @@ class DeribitWsClient(AbstractWsClient):
                 batch = []
                 message_generator = self.connect()
                 async for message in message_generator:
-                    if not self._is_running.is_set(): break
+                    if not self._is_running.is_set():
+                        break
                     reconnect_attempts = 0
                     batch.append(message.model_dump(exclude_none=True))
                     if len(batch) >= 100:
                         await self.redis_client.xadd_bulk(self.stream_name, batch)
-                        log.debug(f"[{self.exchange_name}] Flushed batch of {len(batch)} messages.")
+                        log.debug(
+                            f"[{self.exchange_name}] Flushed batch of {len(batch)} messages."
+                        )
                         batch.clear()
 
             except asyncio.CancelledError:
                 break
             except Exception:
-                log.exception(f"[{self.exchange_name}] Unhandled error in processor for '{self.market_def.market_id}'")
+                log.exception(
+                    f"[{self.exchange_name}] Unhandled error in processor for '{self.market_def.market_id}'"
+                )
             finally:
                 if self.websocket_client:
                     await self.websocket_client.close()

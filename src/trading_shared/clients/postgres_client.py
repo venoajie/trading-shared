@@ -112,7 +112,7 @@ class PostgresClient:
         resource manager's expected interface.
         """
         await self.close_pool()
-        
+
     async def _setup_json_codec(
         self,
         connection: asyncpg.Connection,

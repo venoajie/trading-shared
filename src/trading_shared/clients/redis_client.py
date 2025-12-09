@@ -43,7 +43,7 @@ class CustomRedisClient:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Ensures the connection pool is closed on exit."""
         await self.close()
-        
+
     async def _safe_close_pool(self):
         """Safely closes the current pool, ignoring errors."""
         pool_to_close = self._pool
@@ -52,8 +52,10 @@ class CustomRedisClient:
             try:
                 await pool_to_close.close()
             except Exception as e:
-                log.warning(f"A non-critical error occurred while closing stale Redis pool: {e}")
-                
+                log.warning(
+                    f"A non-critical error occurred while closing stale Redis pool: {e}"
+                )
+
     async def get_pool(self) -> aioredis.Redis:
         async with self._lock:
             # CORRECTED: Use self._pool
@@ -113,7 +115,7 @@ class CustomRedisClient:
             )
 
     async def close(self):
-        async with self._lock: # Protect against race conditions with get_pool
+        async with self._lock:  # Protect against race conditions with get_pool
             pool_to_close = self._pool
             self._pool = None
             if pool_to_close:
@@ -121,9 +123,10 @@ class CustomRedisClient:
                     await pool_to_close.close()
                     log.info("Redis connection pool closed.")
                 except Exception as e:
-                    log.warning(f"A non-critical error occurred while closing Redis pool: {e}")
-                    
-                
+                    log.warning(
+                        f"A non-critical error occurred while closing Redis pool: {e}"
+                    )
+
     async def _execute_resiliently(
         self,
         func: Callable[[aioredis.Redis], Awaitable[T]],
@@ -249,7 +252,7 @@ class CustomRedisClient:
                 await self.xadd_to_dlq(stream_name, chunk)
                 # Re-raise to signal that the write operation ultimately failed.
                 raise
-            
+
     async def xadd_to_dlq(
         self,
         original_stream_name: str,
@@ -370,7 +373,7 @@ class CustomRedisClient:
             )
         except redis_exceptions.ResponseError as e:
             log.warning(f"Could not run XAUTOCLAIM on '{stream_name}': {e}.")
-            return b'0-0', [] # Return a valid, non-operational start_id
+            return b"0-0", []  # Return a valid, non-operational start_id
         except Exception as e:
             log.error(f"An unexpected error occurred during XAUTOCLAIM: {e}")
             raise
@@ -397,7 +400,7 @@ class CustomRedisClient:
             # Re-raise as a more specific application-level exception or return None,
             # but do not swallow other unexpected errors.
             return None
-        
+
     async def get_system_state(self) -> str:
         try:
             state = await self._execute_resiliently(
@@ -544,8 +547,7 @@ class CustomRedisClient:
             )
 
         await self._execute_resiliently(command, f"XADD {name}")
-        
-        
+
     async def lpush(self, key: str, value: str | bytes):
         return await self._execute_resiliently(
             lambda pool: pool.lpush(key, value), f"LPUSH {key}"
