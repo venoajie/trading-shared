@@ -1,0 +1,33 @@
+
+**Persona:** You are a Senior Software Engineer with expertise in distributed systems, caching patterns, and asynchronous task queuing using Redis. You are tasked with purifying a generic Redis client by decoupling it from a specific business process.
+
+**Core Objective:** Refactor the `CustomRedisClient` to remove all logic specific to the "OHLC" work queue. Create a dedicated `OhlcWorkQueueRepository` to house this logic. Update all services that produce or consume from this queue to use the new repository.
+
+**Provided Artifacts:**
+*   The complete application source code.
+
+**Architectural Context:**
+*   The `CustomRedisClient` incorrectly contains methods and constants for managing an OHLC data processing queue. This couples the client to the implementation details of the backfill and analyzer services.
+
+**Execution Directives:**
+
+1.  **Identify Domain Logic:** Pinpoint all OHLC-specific members in `redis_client.py`: constants (`_OHLC...KEY`) and methods (`clear_ohlc...`, `enqueue_ohlc...`, `dequeue_ohlc...`, `get_ohlc...`).
+
+2.  **Refactor `CustomRedisClient`:** Remove all identified OHLC-specific members.
+
+3.  **Implement `OhlcWorkQueueRepository`:**
+    *   Create the file `src/trading_shared/repositories/ohlc_queue_repository.py`.
+    *   Create the `OhlcWorkQueueRepository` class, initialized with a `CustomRedisClient` instance.
+    *   Move the OHLC constants and methods into this repository, modifying them to use the client's generic methods (`lpush`, `brpop`, `llen`, `delete`).
+
+4.  **Refactor Consumer Services:**
+    *   **Backfill Service (`manager.py`):** Inject the `OhlcWorkQueueRepository` and refactor all queue-related calls to use it.
+    *   **Analyzer Service (`service.py`):** Inject the `OhlcWorkQueueRepository` and refactor all queue-related calls to use it.
+
+5.  **Update Service Orchestration (`main.py`):** In `backfill/main.py` and `analyzer/main.py`, instantiate the `OhlcWorkQueueRepository` and inject it into the main service class.
+
+**Verification Checklist:**
+*   `CustomRedisClient` contains no OHLC-specific logic. (Yes/No)
+*   `OhlcWorkQueueRepository` is created and fully functional. (Yes/No)
+*   `backfill` and `analyzer` services are refactored to use the new repository. (Yes/No)
+*   The `main.py` files for `backfill` and `analyzer` are updated. (Yes/No)

@@ -1,0 +1,188 @@
+**Principal AI Cognitive Architect**
+
+**Status:** All required documentation is complete. The information gap is resolved. The mission is unblocked.
+
+The final set of provided files, including `reconciliation_agent.py` and the complete application file tree, has been analyzed. A comprehensive dependency map has been constructed.
+
+However, the full analysis has revealed **two critical inconsistencies** that must be remediated before the primary refactoring can begin. These are bugs and version mismatches that would cause a naive refactoring to fail.
+
+### **Prerequisite Remediation**
+
+The following issues must be resolved first to establish a stable baseline for the architectural changes.
+
+#### **1. [CRITICAL] Missing Method in `PostgresClient`**
+
+*   **Observation:** The file `src/services/executor/executor/state_manager.py` calls a method named `self.db.fetch_ohlc_for_instrument(...)`. This method **does not exist** in the provided source for `src/trading_shared/clients/postgres_client.py`.
+*   **Impact:** The `executor` service is currently non-functional and will raise an `AttributeError`.
+*   **Action:** A generic, correctly implemented method must be added to `PostgresClient`. This method will later be moved to the `OhlcRepository`.
+
+**Proposed Implementation for `postgres_client.py`:**
+
+```python
+    # ADD THIS METHOD TO postgres_client.py
+    async def fetch_ohlc_for_instrument(
+        self,
+        exchange_name: str,
+        instrument_name: str,
+        resolution_str: str,
+        limit: int,
+    ) -> List[asyncpg.Record]:
+        """
+        Fetches the most recent OHLC records for a given instrument and resolution.
+        """
+        resolution_td = self._parse_resolution_to_timedelta(resolution_str)
+        query = """
+            SELECT * FROM ohlc
+            WHERE exchange = $1 AND instrument_name = $2 AND resolution = $3
+            ORDER BY tick DESC
+            LIMIT $4;
+        """
+        # This will be returned in descending order. The consumer can reverse if needed.
+        return await self.fetch(
+            query, exchange_name, instrument_name, resolution_td, limit
+        )
+```
+
+#### **2. [CRITICAL] Missing DLQ Method in `RedisClient`**
+
+*   **Observation:** The file `src/services/executor/executor/command_listener.py` calls a non-existent method: `self.redis.move_to_dlq(...)`.
+*   **Impact:** The `executor` service's command listener cannot handle poison-pill messages correctly, leading to either repeated processing failures or data loss.
+*   **Action:** A standardized method for moving failed messages to a Dead Letter Queue must be added to `CustomRedisClient`. This method should be generic and reusable.
+
+**Proposed Implementation for `redis_client.py`:**
+
+```python
+    # ADD THIS METHOD TO redis_client.py
+    async def move_to_dlq(
+        self,
+        source_stream: str,
+        source_group: str,
+        message_id: str,
+        message_data: dict,
+        error: str,
+    ):
+        """
+        Atomically claims a message, moves its contents to a DLQ stream, and ACKs the original.
+        This is a robust pattern for handling poison pills in consumer groups.
+        """
+        dlq_stream = f"dlq:{source_stream}"
+        log.warning(
+            f"Moving failed message {message_id} from '{source_stream}' to DLQ '{dlq_stream}'"
+        )
+
+        # Prepare payload for DLQ
+        failed_message_payload = {
+            "original_message_id": message_id,
+            "original_stream": source_stream,
+            "error": error,
+            "failed_at": datetime.now(timezone.utc).isoformat(),
+            # Decode bytes to strings for clean JSON serialization
+            "payload": {
+                k.decode("utf-8"): v.decode("utf-8") for k, v in message_data.items()
+            },
+        }
+
+        async def command(pool: aioredis.Redis):
+            pipe = pool.pipeline()
+            # Add to DLQ
+            pipe.xadd(dlq_stream, {"payload": orjson.dumps(failed_message_payload)})
+            # Acknowledge (remove) from original stream's group
+            pipe.xack(source_stream, source_group, message_id)
+            await pipe.execute()
+
+        await self._execute_resiliently(command, "move_to_dlq")
+
+```
+
+---
+
+With these prerequisite fixes, the codebase is now consistent and ready for the primary architectural refactoring. The following prompts detail the execution plan.
+
+### **Execution Prompt 1: PostgreSQL Refactoring**
+
+**Persona:** You are a Principal Database Engineer specializing in Data Access Layer (DAL) architecture and Python `asyncio` patterns. Your mandate is to enforce strict separation of concerns in shared data-access libraries.
+
+**Core Objective:** Refactor the provided `PostgresClient` to be a pure, generic database connection manager. Extract all domain-specific data access logic into a new, well-defined repository layer. Refactor all consuming services to use these new repositories, ensuring zero loss of functionality.
+
+**Provided Artifacts:**
+*   The complete application source code.
+
+**Architectural Context:**
+*   The `PostgresClient` is a shared library component contaminated with methods tightly coupled to the application's schema.
+*   This violates the Single Responsibility Principle, making the client brittle and hard to maintain.
+*   The goal is to move from a "Fat Client" model to a "Thin Client + Repository Layer" model.
+
+**Execution Directives:**
+
+1.  **Audit and Categorize:** Systematically analyze every method in `postgres_client.py`. Create a definitive list separating generic methods (`execute`, `fetch`, `fetchrow`, `fetchval`) from domain-specific methods (all others, including the newly added `fetch_ohlc_for_instrument`).
+
+2.  **Design the Repository Layer:** Create a new directory `src/trading_shared/repositories/`. Group the identified domain-specific methods into logical repository classes within this directory:
+    *   `InstrumentRepository`
+    *   `TradeRepository`
+    *   `OrderRepository`
+    *   `OhlcRepository`
+    *   `TickerRepository`
+    *   `SystemRepository`
+    *   Each repository will be initialized with an instance of the `PostgresClient`.
+
+3.  **Refactor `PostgresClient`:** Remove all domain-specific methods. The final class must only contain its `__init__`, context managers, connection pool logic, `_parse_resolution_to_timedelta`, `_setup_json_codec`, and the four generic execution methods.
+
+4.  **Implement Repositories:** Create the new repository files. Implement the classes designed in Step 2. The internal logic of the methods will be identical to their previous versions but will now call the generic client (e.g., `return await self._db.fetch(...)`).
+
+5.  **Refactor All Consumer Services:**
+    *   **Receiver (`deribit.py`):** Inject `InstrumentRepository` and refactor the call to `fetch_instruments_by_exchange`.
+    *   **Executor (`state_manager.py`):** Inject `InstrumentRepository` and `OhlcRepository`. Refactor calls to `fetch_instruments_by_exchange` and `fetch_ohlc_for_instrument`.
+    *   **Janitor (`tasks.py`):** Inject `InstrumentRepository` and refactor the call to `bulk_upsert_instruments`.
+    *   **Maintenance (`service.py`):** No changes needed. It correctly uses the generic `execute` method.
+
+6.  **Update Service Orchestration (`main.py`):** For each affected service, update its `main.py` file to instantiate the required repositories and inject them into the service class.
+
+**Verification Checklist:**
+*   `PostgresClient` contains *only* generic methods. (Yes/No)
+*   All domain methods are successfully moved to the correct repository. (Yes/No)
+*   `receiver`, `executor`, and `janitor` services are refactored to use the new repositories. (Yes/No)
+*   The `main.py` file for each affected service is updated to handle dependency injection. (Yes/No)
+*   The `maintenance` service remains untouched. (Yes/No)
+
+---
+
+### **Execution Prompt 2: Redis Refactoring**
+
+**Persona:** You are a Senior Software Engineer with expertise in distributed systems, caching patterns, and asynchronous task queuing using Redis. You are tasked with purifying a generic Redis client by decoupling it from a specific business process.
+
+**Core Objective:** Refactor the `CustomRedisClient` to remove all logic specific to the "OHLC" work queue. Create a dedicated `OhlcWorkQueueRepository` to house this logic. Update all services that produce or consume from this queue to use the new repository.
+
+**Provided Artifacts:**
+*   The complete application source code.
+
+**Architectural Context:**
+*   The `CustomRedisClient` incorrectly contains methods and constants for managing an OHLC data processing queue. This couples the client to the implementation details of the backfill and analyzer services.
+
+**Execution Directives:**
+
+1.  **Identify Domain Logic:** Pinpoint all OHLC-specific members in `redis_client.py`: constants (`_OHLC...KEY`) and methods (`clear_ohlc...`, `enqueue_ohlc...`, `dequeue_ohlc...`, `get_ohlc...`).
+
+2.  **Refactor `CustomRedisClient`:** Remove all identified OHLC-specific members.
+
+3.  **Implement `OhlcWorkQueueRepository`:**
+    *   Create the file `src/trading_shared/repositories/ohlc_queue_repository.py`.
+    *   Create the `OhlcWorkQueueRepository` class, initialized with a `CustomRedisClient` instance.
+    *   Move the OHLC constants and methods into this repository, modifying them to use the client's generic methods (`lpush`, `brpop`, `llen`, `delete`).
+
+4.  **Refactor Consumer Services:**
+    *   **Backfill Service (`manager.py`):** Inject the `OhlcWorkQueueRepository` and refactor all queue-related calls to use it.
+    *   **Analyzer Service (`service.py`):** Inject the `OhlcWorkQueueRepository` and refactor all queue-related calls to use it.
+
+5.  **Update Service Orchestration (`main.py`):** In `backfill/main.py` and `analyzer/main.py`, instantiate the `OhlcWorkQueueRepository` and inject it into the main service class.
+
+**Verification Checklist:**
+*   `CustomRedisClient` contains no OHLC-specific logic. (Yes/No)
+*   `OhlcWorkQueueRepository` is created and fully functional. (Yes/No)
+*   `backfill` and `analyzer` services are refactored to use the new repository. (Yes/No)
+*   The `main.py` files for `backfill` and `analyzer` are updated. (Yes/No)
+
+---
+
+I have completed the analysis and planning. I recommend executing the prerequisite remediation first, followed by the two main refactoring prompts.
+
+Does this comprehensive plan align with the mission parameters? Shall I execute?
