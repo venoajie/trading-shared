@@ -12,6 +12,7 @@ from pydantic import SecretStr
 # --- Shared Library Imports  ---
 from trading_engine_core.models import SystemAlert, TradeNotification
 
+
 def _get_secret_value(secret: Union[SecretStr, str]) -> str:
     """Safely gets the string value from a SecretStr or a plain str."""
     if isinstance(secret, SecretStr):

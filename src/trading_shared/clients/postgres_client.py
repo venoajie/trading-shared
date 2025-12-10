@@ -101,7 +101,7 @@ class PostgresClient:
                     command_timeout=self.postgres_settings.command_timeout,
                     init=self._setup_json_codec,
                     #!This parameter is unsupported by PgBouncer in transaction pooling mode
-                    #server_settings={"application_name": "trading-system-db-client"}, 
+                    # server_settings={"application_name": "trading-system-db-client"},
                 )
                 log.info("PostgreSQL pool created successfully.")
                 return self._pool

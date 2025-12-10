@@ -10,11 +10,13 @@ from loguru import logger as log
 # --- Shared Library Imports ---
 from trading_shared.clients.redis_client import CustomRedisClient
 
+
 class OhlcWorkQueueRepository:
     """
     Manages interaction with the Redis-based work queue for OHLC backfilling.
     This class encapsulates domain-specific logic, using a generic Redis client.
     """
+
     _WORK_QUEUE_KEY = "queue:ohlc_work"
     _FAILED_QUEUE_KEY = "dlq:ohlc_work"
 
@@ -36,7 +38,9 @@ class OhlcWorkQueueRepository:
             await self._redis.lpush(self._FAILED_QUEUE_KEY, orjson.dumps(work_item))
             log.error(f"Moved failed OHLC work item to DLQ: {work_item}")
         except Exception as e:
-            log.critical(f"CRITICAL: Failed to enqueue to DLQ. Item lost: {work_item}. Error: {e}")
+            log.critical(
+                f"CRITICAL: Failed to enqueue to DLQ. Item lost: {work_item}. Error: {e}"
+            )
 
     async def dequeue_work(self) -> dict[str, Any] | None:
         """Blocks and waits for a work item from the queue."""

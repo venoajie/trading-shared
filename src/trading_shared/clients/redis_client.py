@@ -556,9 +556,11 @@ class CustomRedisClient:
                 k.decode("utf-8"): v.decode("utf-8") for k, v in message_data.items()
             },
         }
+
         async def command(pool: aioredis.Redis):
             pipe = pool.pipeline()
             pipe.xadd(dlq_stream, {"payload": orjson.dumps(failed_message_payload)})
             pipe.xack(source_stream, source_group, message_id)
             await pipe.execute()
+
         await self._execute_resiliently(command, "move_to_dlq")
