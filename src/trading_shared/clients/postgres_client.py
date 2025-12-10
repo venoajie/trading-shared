@@ -22,11 +22,11 @@ class PostgresClient:
     """A resilient client for interacting with PostgreSQL via asyncpg."""
 
     _pool: asyncpg.Pool | None = None
-    _lock = asyncio.Lock()
 
     def __init__(self, settings: PostgresSettings | None = None):
         self.postgres_settings = settings
         self.dsn = self.postgres_settings.dsn if self.postgres_settings else None
+        self._lock = asyncio.Lock()  # Instance-scoped lock
 
     async def __aenter__(self):
         """Allows the client to be used as an async context manager."""
@@ -45,8 +45,16 @@ class PostgresClient:
         """
         Executes a PostgreSQL command with a retry mechanism for connection errors.
         """
+        if not self.postgres_settings:
+            raise ValueError(
+                "Postgres settings not configured for resilient execution."
+            )
+
         last_exception: Exception | None = None
-        for attempt in range(3):
+        max_retries = self.postgres_settings.max_retries
+        initial_delay = self.postgres_settings.initial_retry_delay_s
+
+        for attempt in range(max_retries):
             try:
                 pool = await self.ensure_pool_is_ready()
                 async with pool.acquire() as conn:
@@ -58,14 +66,14 @@ class PostgresClient:
             ) as e:
                 log.warning(
                     f"Postgres command '{command_name_for_logging}' failed "
-                    f"(attempt {attempt + 1}/3): {e}"
+                    f"(attempt {attempt + 1}/{max_retries}): {e}"
                 )
                 last_exception = e
-                if attempt < 2:
-                    await asyncio.sleep(0.5 * (2**attempt))
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(initial_delay * (2**attempt))
 
         log.error(
-            f"Postgres command '{command_name_for_logging}' failed after 3 attempts."
+            f"Postgres command '{command_name_for_logging}' failed after {max_retries} attempts."
         )
         raise ConnectionError(
             f"Failed to execute Postgres command '{command_name_for_logging}' after retries."
@@ -73,10 +81,11 @@ class PostgresClient:
 
     async def ensure_pool_is_ready(self) -> asyncpg.Pool:
         async with self._lock:
-            if self._pool is not None and not self._pool._closed:
+            # If pool exists, return it. acquire() will handle broken connections.
+            if self._pool is not None:
                 return self._pool
 
-            if not self.dsn:
+            if not self.dsn or not self.postgres_settings:
                 raise ValueError(
                     "Cannot start PostgreSQL pool: No configuration found."
                 )
@@ -87,9 +96,9 @@ class PostgresClient:
                 # Aligned pool size with best practices for PgBouncer.
                 self._pool = await asyncpg.create_pool(
                     dsn=self.dsn,
-                    min_size=1,
-                    max_size=2,
-                    command_timeout=30,
+                    min_size=self.postgres_settings.pool_min_size,
+                    max_size=self.postgres_settings.pool_max_size,
+                    command_timeout=self.postgres_settings.command_timeout,
                     init=self._setup_json_codec,
                     server_settings={"application_name": "trading-system-db-client"},
                 )

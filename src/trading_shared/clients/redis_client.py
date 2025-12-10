@@ -65,8 +65,6 @@ class CustomRedisClient:
 
     async def _get_pool(self) -> aioredis.Redis:
         async with self._lock:
-            # SIMPLIFIED: If pool exists, assume it's good. Let the resilient
-            # executor handle failures reactively.
             if self._pool:
                 return self._pool
 
@@ -76,69 +74,55 @@ class CustomRedisClient:
                     raise ConnectionError("Redis unavailable - circuit breaker open")
                 self._circuit_open = False
 
-            redis_config = self._settings
-            for attempt in range(5):
-                try:
-                    password_value = (
-                        redis_config.password.get_secret_value()
-                        if redis_config.password
-                        else None
-                    )
+            # Connection attempt logic is now simplified; retries are handled by the resilient executor
+            try:
+                password_value = (
+                    self._settings.password.get_secret_value()
+                    if self._settings.password
+                    else None
+                )
 
-                    self._pool = aioredis.from_url(
-                        redis_config.url,
-                        password=password_value,
-                        db=int(redis_config.db or 0),
-                        socket_connect_timeout=2,
-                        socket_keepalive=True,
-                        socket_keepalive_options={
-                            socket.TCP_KEEPIDLE: 60,
-                            socket.TCP_KEEPINTVL: 30,
-                            socket.TCP_KEEPCNT: 5,
-                        },
-                        max_connections=30,
-                        encoding="utf-8",
-                        decode_responses=False,
-                    )
-                    await asyncio.wait_for(self._pool.ping(), timeout=3)
-                    self._reconnect_attempts = 0
-                    log.info("Redis connection established")
-                    return self._pool
-                except (
-                    redis_exceptions.ConnectionError,
-                    redis_exceptions.TimeoutError,
-                    TimeoutError,
-                    socket.gaierror,
-                ) as e:
-                    log.warning(f"Connection failed on attempt {attempt + 1}: {e}")
-                    await self._safe_close_pool()
-                    if attempt < 4:
-                        await asyncio.sleep(2**attempt)
-                    last_error = e
-
-            self._circuit_open = True
-            self._last_failure = time.time()
-            self._reconnect_attempts += 1
-            raise ConnectionError(
-                f"Redis connection failed after 5 attempts: {last_error}"
-            )
+                self._pool = aioredis.from_url(
+                    self._settings.url,
+                    password=password_value,
+                    db=int(self._settings.db or 0),
+                    socket_connect_timeout=self._settings.socket_connect_timeout,
+                    socket_keepalive=True,
+                    socket_keepalive_options={
+                        socket.TCP_KEEPIDLE: 60,
+                        socket.TCP_KEEPINTVL: 30,
+                        socket.TCP_KEEPCNT: 5,
+                    },
+                    max_connections=self._settings.max_connections,
+                    encoding="utf-8",
+                    decode_responses=False,
+                )
+                await asyncio.wait_for(self._pool.ping(), timeout=3)
+                self._reconnect_attempts = 0
+                log.info("Redis connection established")
+                return self._pool
+            except (
+                redis_exceptions.ConnectionError,
+                redis_exceptions.TimeoutError,
+                TimeoutError,
+                socket.gaierror,
+            ) as e:
+                log.warning(f"Initial Redis connection failed: {e}")
+                await self._safe_close_pool()
+                self._circuit_open = True
+                self._last_failure = time.time()
+                self._reconnect_attempts += 1
+                raise ConnectionError(
+                    "Redis connection failed on initial attempt."
+                ) from e
 
     async def close(self):
         """
-        Gracefully closes the active Redis connection pool. This method is
-        automatically called when exiting an 'async with' block.
+        Gracefully closes the active Redis connection pool.
         """
         async with self._lock:
-            pool_to_close = self._pool
-            self._pool = None
-            if pool_to_close:
-                try:
-                    await pool_to_close.close()
-                    log.info("Redis connection pool closed.")
-                except Exception as e:
-                    log.warning(
-                        f"A non-critical error occurred while closing Redis pool: {e}"
-                    )
+            await self._safe_close_pool()
+            log.info("Redis connection pool closed.")
 
     async def _execute_resiliently(
         self,
@@ -146,40 +130,14 @@ class CustomRedisClient:
         command_name_for_logging: str,
     ) -> T:
         """
-
         Executes a given Redis command function with a resilient retry mechanism.
-
-        This wrapper is the core of the client's high-availability strategy.
-        It transparently handles transient network issues by retrying commands
-        that fail due to connection or timeout errors.
-
-        Behavior:
-        - Attempts to execute the command up to 3 times.
-        - Implements an exponential backoff delay between retries (0.5s, 1.0s).
-        - Catches specific, recoverable exceptions: `redis.exceptions.ConnectionError`
-          and `redis.exceptions.TimeoutError`.
-        - If all retries fail, it re-raises a `ConnectionError` that chains
-          the original exception for full context.
-
-        Args:
-            func: An awaitable function that takes a Redis pool instance and
-                  executes one or more commands.
-            command_name_for_logging: A string name for the command used in
-                                      log messages for clarity.
-
-        Returns:
-            The return value of the provided `func` on a successful execution.
-
-        Raises:
-            ConnectionError: If the command fails after all retry attempts.
-            redis.exceptions.RedisError: For non-recoverable Redis errors
-                                         (e.g., syntax errors, wrong key type).
         """
-
         last_exception: Exception | None = None
-        for attempt in range(3):
+        max_retries = self._settings.max_retries
+        initial_delay = self._settings.initial_retry_delay_s
+
+        for attempt in range(max_retries):
             try:
-                # CORRECTED: Call the internal _get_pool method
                 pool = await self._get_pool()
                 return await func(pool)
             except (
@@ -189,14 +147,16 @@ class CustomRedisClient:
             ) as e:
                 log.warning(
                     f"Redis command '{command_name_for_logging}' failed "
-                    f"(attempt {attempt + 1}/3): {e}"
+                    f"(attempt {attempt + 1}/{max_retries}): {e}"
                 )
                 last_exception = e
-                if attempt < 2:
-                    await asyncio.sleep(0.5 * (2**attempt))
+                # Invalidate the pool on any connection-related failure to force re-establishment
+                await self._safe_close_pool()
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(initial_delay * (2**attempt))
 
         log.error(
-            f"Redis command '{command_name_for_logging}' failed after 3 attempts."
+            f"Redis command '{command_name_for_logging}' failed after {max_retries} attempts."
         )
         raise ConnectionError(
             f"Failed to execute Redis command '{command_name_for_logging}' after retries."

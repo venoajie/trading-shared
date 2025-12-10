@@ -10,6 +10,7 @@ Perform a comprehensive audit of the provided `postgres_client.py` and `redis_cl
 
 1.  `src/trading_shared/clients/postgres_client.py`
 2.  `src/trading_shared/clients/redis_client.py`
+3.  `examples of main.py files and their related supporting files`
 
 **Architectural Context:**
 
