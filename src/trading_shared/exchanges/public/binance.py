@@ -11,7 +11,7 @@ from loguru import logger as log
 
 # --- Shared Library Imports ---
 from .base import PublicExchangeClient
-from ..trading.binance_constants import BinanceMarketType
+from .binance_constants import BinanceMarketType
 from ...config.models import ExchangeSettings
 
 
@@ -27,20 +27,28 @@ class BinancePublicClient(PublicExchangeClient):
             raise ValueError("Binance rest_url not configured.")
         self.base_url = settings.rest_url
         self.http_session = http_session
-        # FIXED: Define market-specific base URLs required by other methods.
         self.spot_url = f"{self.base_url}/api/v3"
         self.linear_futures_url = f"{self.base_url}/fapi/v1"
         self.inverse_futures_url = f"{self.base_url}/dapi/v1"
 
     def _get_api_url_for_instrument(self, instrument_name: str) -> str:
         """Determines the correct API base URL (spot or futures) for a given instrument."""
-        # This assumes a helper function exists in the base class or here
-        # to determine market type from name conventions (e.g., PERP).
-        # For simplicity, we'll make a basic assumption.
-        if "PERP" in instrument_name:
-             return self.linear_futures_url
+        # This is a simplified stand-in for a more robust detection method
+        # that should exist in a complete implementation.
+        market_type = self.get_market_type_from_instrument_name(instrument_name)
+        
+        # Using the Enum for a safe, explicit comparison
+        if market_type == BinanceMarketType.FUTURES_USD_M:
+            return self.linear_futures_url
+        
         return self.spot_url
 
+    # A placeholder for the detection logic mentioned above
+    def get_market_type_from_instrument_name(self, instrument_name: str) -> BinanceMarketType:
+        if instrument_name.endswith("PERP"):
+            return BinanceMarketType.FUTURES_USD_M
+        return BinanceMarketType.SPOT
+        
     def _transform_candle_data_to_canonical(
         self,
         raw_candle: list,
