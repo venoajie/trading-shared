@@ -28,11 +28,17 @@ class OhlcWorkQueueRepository:
         await self._redis.delete(self._WORK_QUEUE_KEY)
         log.info(f"Cleared Redis queue: {self._WORK_QUEUE_KEY}")
 
-    async def enqueue_work(self, work_item: dict[str, Any]):
+    async def enqueue_work(
+        self,
+        work_item: dict[str, Any],
+    ):
         """Adds a new work item to the queue."""
         await self._redis.lpush(self._WORK_QUEUE_KEY, orjson.dumps(work_item))
 
-    async def enqueue_failed_work(self, work_item: dict[str, Any]):
+    async def enqueue_failed_work(
+        self,
+        work_item: dict[str, Any],
+    ):
         """Moves a failed work item to the Dead Letter Queue."""
         try:
             await self._redis.lpush(self._FAILED_QUEUE_KEY, orjson.dumps(work_item))
