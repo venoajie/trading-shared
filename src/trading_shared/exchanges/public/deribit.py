@@ -2,29 +2,84 @@
 
 # --- Built Ins ---
 import asyncio
+from typing import List, Dict, Any
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
 
 # --- Installed ---
 import aiohttp
 from loguru import logger as log
 
-# --- Local Application Imports ---
-from ...config.models import ExchangeSettings
+# --- Shared Library Imports ---
 from .base import PublicExchangeClient
-
+from ..trading.deribit_constants import ApiMethods
+from ...config.models import ExchangeSettings
 
 class DeribitPublicClient(PublicExchangeClient):
     """
-    An API client for public, non-authenticated Deribit endpoints.
+    Client for Deribit's public REST API endpoints.
     """
+    _request_id = 0
 
-    def __init__(
+    def __init__(self, settings: ExchangeSettings, http_session: aiohttp.ClientSession):
+        super().__init__()
+        if not settings.rest_url:
+            raise ValueError("Deribit rest_url not configured.")
+        self.base_url = settings.rest_url
+        self.http_session = http_session
+
+    async def _make_request(self, method: str, params: Dict[str, Any]) -> Dict:
+        """Helper to make a JSON-RPC request to the Deribit API."""
+        self._request_id += 1
+        payload = {
+            "jsonrpc": "2.0",
+            "id": self._request_id,
+            "method": method,
+            "params": params,
+        }
+        try:
+            async with self.http_session.post(f"{self.base_url}/api/v2/{method}", json=payload) as response:
+                response.raise_for_status()
+                data = await response.json()
+                if "error" in data:
+                    log.error(f"Deribit API error for method {method}: {data['error']}")
+                    return {}
+                return data.get("result", {})
+        except aiohttp.ClientError as e:
+            log.error(f"Failed to call Deribit API method {method}: {e}")
+            return {}
+        except Exception:
+            log.exception(f"An unexpected error occurred during Deribit API call for {method}")
+            return {}
+
+    def _transform_candle_data_to_canonical(
         self,
-        settings: ExchangeSettings,
-        http_session: aiohttp.ClientSession,
-    ):
-        super().__init__(settings, http_session)
+        raw_candles: Dict[str, List],
+        exchange: str,
+        instrument_name: str,
+        resolution: str,
+    ) -> List[Dict[str, Any]]:
+        """Transforms the Deribit chart data response into our standard list of dicts."""
+        canonical_candles = []
+        ticks = raw_candles.get("ticks", [])
+        opens = raw_candles.get("open", [])
+        highs = raw_candles.get("high", [])
+        lows = raw_candles.get("low", [])
+        closes = raw_candles.get("close", [])
+        volumes = raw_candles.get("volume", [])
+
+        for i, tick in enumerate(ticks):
+            canonical_candles.append({
+                "exchange": exchange,
+                "instrument_name": instrument_name,
+                "resolution": resolution,
+                "tick": tick,
+                "open": opens[i],
+                "high": highs[i],
+                "low": lows[i],
+                "close": closes[i],
+                "volume": volumes[i],
+            })
+        return canonical_candles
 
     async def connect(self):
         """The shared session is managed externally. This method is a no-op."""
@@ -34,156 +89,55 @@ class DeribitPublicClient(PublicExchangeClient):
         """The shared session is managed externally. This method is a no-op."""
         pass
 
-    async def _public_request(
-        self,
-        endpoint: str,
-        params: Optional[dict] = None,
-    ) -> Any:
-        """Helper for making a public request to Deribit."""
-
-        url = f"{self.base_url}/api/v2/{endpoint}"
-        try:
-            # The get() call will raise ClientError if the session is closed.
-            async with self.http_session.get(
-                url, params=params, timeout=20
-            ) as response:
-                response.raise_for_status()
-                data = await response.json()
-                if isinstance(data, dict):
-                    return data.get("result", {})
-                return data.get("result", [])
-        except aiohttp.ClientError as e:
-            # More specific catch for aiohttp-related issues, including a closed session.
-            log.error(f"Failed to fetch from Deribit public endpoint {endpoint}: {e}")
-            return [] if not endpoint.endswith("chart_data") else {}
-        except Exception as e:
-            log.error(
-                f"An unexpected error occurred for Deribit endpoint {endpoint}: {e}"
-            )
-            return [] if not endpoint.endswith("chart_data") else {}
-
-    async def get_instruments(
-        self,
-        currencies: List[str],
-    ) -> List[Dict[str, Any]]:
-        """
-        Fetches all relevant raw instruments by looping through the provided currencies.
-        Returns the data without transformation.
-        """
-        all_raw_instruments = []
+    async def get_instruments(self, currencies: List[str]) -> List[Dict[str, Any]]:
+        """Fetches all instruments for the given currencies from Deribit."""
+        all_instruments = []
         for currency in currencies:
-            for kind in ["future", "option"]:
-                params = {"currency": currency, "kind": kind, "expired": "false"}
-                raw_instruments = await self._public_request(
-                    "public/get_instruments", params
-                )
-                if raw_instruments and isinstance(raw_instruments, list):
-                    all_raw_instruments.extend(raw_instruments)
-                    log.info(
-                        f"[DeribitPublicClient] Fetched {len(raw_instruments)} raw {kind} instruments for {currency}."
-                    )
-                # Rate limit requests
-                await asyncio.sleep(0.2)
-        return all_raw_instruments
+            params = {"currency": currency, "expired": False}
+            instruments = await self._make_request(ApiMethods.GET_INSTRUMENTS, params)
+            if instruments:
+                all_instruments.extend(instruments)
+        log.success(f"[DeribitPublicClient] Total raw instruments fetched: {len(all_instruments)}")
+        return all_instruments
 
-    async def get_historical_ohlc(
+    async def get_public_ohlc(
         self,
-        instrument: str,
-        start_ts: int,
-        end_ts: int,
+        instrument_name: str,
         resolution: str,
-        market_type: str,
-    ) -> Dict[str, Any]:
-        """Fetches OHLC data from the TradingView-compatible endpoint."""
-        params = {
-            "instrument_name": instrument,
-            "start_timestamp": start_ts,
-            "end_timestamp": end_ts,
-            "resolution": resolution,
-        }
-
-        return await self._public_request("public/get_tradingview_chart_data", params)
-
-    async def get_public_trades(
-        self,
-        instrument: str,
-        start_ts: int,
-        end_ts: int,
-        market_type: str,
+        start_timestamp_ms: int,
+        limit: int = 1000, # Note: Deribit doesn't use a 'limit' param for this endpoint
     ) -> List[Dict[str, Any]]:
-        """Fetches historical public trades for a given instrument with pagination."""
-        log.info(f"Fetching public trades for {instrument} from {start_ts} to {end_ts}")
-        all_trades = []
-        current_start_ts = start_ts
+        """
+        Fetches OHLC data from Deribit's public/get_tradingview_chart_data endpoint.
+        Deribit's API takes a time range, so it is not paginated like Binance's.
+        """
+        # Deribit's resolution format is minutes as a string, e.g., '1', '15', '60', or '1D'
+        resolution_map = {"1m": "1", "5m": "5", "15m": "15", "1h": "60", "1d": "1D"}
+        deribit_resolution = resolution_map.get(resolution)
+        if not deribit_resolution:
+            log.error(f"Unsupported resolution for Deribit: {resolution}. Must be one of {list(resolution_map.keys())}")
+            return []
 
-        while current_start_ts < end_ts:
-            params = {
-                "instrument_name": instrument,
-                "start_timestamp": current_start_ts,
-                "end_timestamp": end_ts,
-                "count": 1000,
-                "sorting": "asc",
-            }
+        # We fetch up to the current time.
+        end_timestamp_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
-            result = await self._public_request(
-                "public/get_last_trades_by_instrument", params
-            )
-            trades = result.get("trades", [])
-            if not trades:
-                break
-
-            for trade in trades:
-                all_trades.append(
-                    {
-                        "exchange": "deribit",
-                        "instrument_name": instrument,
-                        "market_type": market_type,
-                        "trade_id": trade.get("trade_id", ""),
-                        "price": trade.get("price", 0),
-                        "quantity": trade.get("amount", 0),
-                        "timestamp": datetime.fromtimestamp(
-                            trade["timestamp"] / 1000, tz=timezone.utc
-                        ),
-                        "is_buyer_maker": trade.get("direction", "") == "sell",
-                    }
-                )
-
-            last_trade_ts = trades[-1]["timestamp"]
-            if last_trade_ts >= end_ts:
-                break
-
-            current_start_ts = last_trade_ts + 1
-            await asyncio.sleep(0.2)
-
-        log.info(f"Fetched {len(all_trades)} public trades for {instrument}")
-        return all_trades
-
-    def _transform_instrument(
-        self,
-        raw_instrument: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        """Transforms a single raw Deribit instrument into our canonical format."""
-        exp_ts_ms = raw_instrument.get("expiration_timestamp")
-        expiration_timestamp = (
-            datetime.fromtimestamp(exp_ts_ms / 1000, tz=timezone.utc)
-            if exp_ts_ms
-            else None
-        )
-
-        return {
-            "exchange": "deribit",
-            "instrument_name": raw_instrument.get("instrument_name"),
-            "market_type": "OPTION"
-            if raw_instrument.get("kind") == "option"
-            else "FUTURE",
-            "base_asset": raw_instrument.get("base_currency"),
-            "quote_asset": raw_instrument.get("quote_currency"),
-            "settlement_asset": raw_instrument.get("settlement_currency")
-            or raw_instrument.get("base_currency"),
-            "tick_size": raw_instrument.get("tick_size"),
-            "contract_size": raw_instrument.get("contract_size"),
-            "expiration_timestamp": expiration_timestamp.isoformat()
-            if expiration_timestamp
-            else None,
-            "data": raw_instrument,
+        params = {
+            "instrument_name": instrument_name,
+            "start_timestamp": start_timestamp_ms,
+            "end_timestamp": end_timestamp_ms,
+            "resolution": deribit_resolution,
         }
+        
+        log.info(f"Fetching OHLC for {instrument_name} from Deribit...")
+        raw_data = await self._make_request(ApiMethods.GET_TRADINGVIEW_CHART_DATA, params)
+
+        if not raw_data or raw_data.get("status") != "ok":
+            log.warning(f"No OHLC data returned from Deribit for {instrument_name}.")
+            return []
+
+        return self._transform_candle_data_to_canonical(
+            raw_candles=raw_data,
+            exchange="deribit",
+            instrument_name=instrument_name,
+            resolution=resolution
+        )
