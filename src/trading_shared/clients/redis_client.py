@@ -24,9 +24,6 @@ T = TypeVar("T")
 class CustomRedisClient:
     """A resilient client wrapper for the redis-py async client."""
 
-    _OHLC_WORK_QUEUE_KEY = "queue:ohlc_work"
-    _OHLC_FAILED_QUEUE_KEY = "dlq:ohlc_work"
-
     def __init__(self, settings: RedisSettings):
         self._settings = settings
         self._pool: Optional[aioredis.Redis] = None
@@ -420,62 +417,6 @@ class CustomRedisClient:
                 f"Could not set system state to '{state}' due to Redis connection error."
             )
 
-    async def clear_ohlc_work_queue(self):
-        await self._execute_resiliently(
-            lambda pool: pool.delete(self._OHLC_WORK_QUEUE_KEY), "delete"
-        )
-        log.info(f"Cleared Redis queue: {self._OHLC_WORK_QUEUE_KEY}")
-
-    async def enqueue_ohlc_work(
-        self,
-        work_item: dict[str, Any],
-    ):
-        await self._execute_resiliently(
-            lambda pool: pool.lpush(self._OHLC_WORK_QUEUE_KEY, orjson.dumps(work_item)),
-            "lpush",
-        )
-
-    async def enqueue_failed_ohlc_work(
-        self,
-        work_item: dict[str, Any],
-    ):
-        try:
-            await self._execute_resiliently(
-                lambda pool: pool.lpush(
-                    self._OHLC_FAILED_QUEUE_KEY, orjson.dumps(work_item)
-                ),
-                "lpush_dlq",
-            )
-            log.error(f"Moved failed OHLC work item to DLQ: {work_item}")
-        except Exception as e:
-            log.critical(
-                f"CRITICAL: Failed to enqueue to DLQ. Item lost: {work_item}. Error: {e}"
-            )
-
-    async def dequeue_ohlc_work(self) -> dict[str, Any] | None:
-        try:
-            result = await self._execute_resiliently(
-                lambda pool: pool.brpop(self._OHLC_WORK_QUEUE_KEY, timeout=5), "brpop"
-            )
-            if result:
-                return orjson.loads(result[1])
-            return None
-        except ConnectionError:
-            log.warning("Redis connection issue during dequeue, returning None.")
-            return None
-        except Exception as e:
-            log.error(f"Unexpected error during OHLC work dequeue: {e}")
-            return None
-
-    async def get_ohlc_work_queue_size(self) -> int:
-        try:
-            return await self._execute_resiliently(
-                lambda pool: pool.llen(self._OHLC_WORK_QUEUE_KEY), "llen"
-            )
-        except ConnectionError:
-            log.error("Failed to get OHLC work queue size due to connection error.")
-            return 0
-
     async def get(self, key: str) -> bytes | None:
         async def command(conn: aioredis.Redis) -> bytes | None:
             return await conn.get(key)
@@ -565,3 +506,11 @@ class CustomRedisClient:
             await pipe.execute()
 
         await self._execute_resiliently(command, "move_to_dlq")
+
+    async def delete(self, key: str):
+        """Deletes a key from Redis."""
+        return await self._execute_resiliently(lambda pool: pool.delete(key), f"DELETE {key}")
+
+    async def llen(self, key: str) -> int:
+        """Returns the length of a list in Redis."""
+        return await self._execute_resiliently(lambda pool: pool.llen(key), f"LLEN {key}")

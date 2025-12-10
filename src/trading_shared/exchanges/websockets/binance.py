@@ -1,8 +1,10 @@
+
 # src\trading_shared\exchanges\websockets\binance.py
 
 # --- Built Ins  ---
 import asyncio
 from typing import AsyncGenerator, Set, List
+from collections import deque
 
 # --- Installed  ---
 from loguru import logger as log
@@ -14,6 +16,7 @@ from .base import AbstractWsClient
 from ...clients.postgres_client import PostgresClient
 from ...clients.redis_client import CustomRedisClient
 from ...config.models import ExchangeSettings
+from ...repositories.market_data_repository import MarketDataRepository
 
 # --- Shared Library Imports  ---
 from trading_engine_core.models import StreamMessage, MarketDefinition
@@ -30,11 +33,12 @@ class BinanceWsClient(AbstractWsClient):
         market_definition: MarketDefinition,
         postgres_client: PostgresClient,
         redis_client: CustomRedisClient,
+        market_data_repo: MarketDataRepository,
         settings: ExchangeSettings,
         initial_subscriptions: List[str]
         | None = None,  # MODIFIED: Added parameter for initial state
     ):
-        super().__init__(market_definition, redis_client, postgres_client)
+        super().__init__(market_definition, market_data_repo, postgres_client)
         self.ws_connection_url = self.market_def.ws_base_url
         self._subscriptions: Set[str] = (
             set(initial_subscriptions) if initial_subscriptions else set()
@@ -43,6 +47,7 @@ class BinanceWsClient(AbstractWsClient):
         self._is_running = asyncio.Event()
         self._control_channel = f"control:{self.market_def.market_id}:subscriptions"
         self.settings = settings
+        self.redis_client = redis_client # Keep for pub/sub listener
 
         if not self._control_channel:
             raise ValueError("Binance subscription control channel not configured.")
@@ -188,7 +193,7 @@ class BinanceWsClient(AbstractWsClient):
 
         while self._is_running.is_set():
             try:
-                batch = []
+                batch = deque()
                 message_generator = self.connect()
                 async for message in message_generator:
                     if not self._is_running.is_set():
@@ -196,18 +201,14 @@ class BinanceWsClient(AbstractWsClient):
                     reconnect_attempts = 0  # Reset on successful message
 
                     # Update Redis ticker snapshot
-                    redis_key = f"ticker:{message.data['symbol']}"
-                    await self.redis_client.hset(
-                        redis_key, "payload", orjson.dumps(message.data)
+                    await self.market_data_repo.cache_ticker(
+                        message.data['symbol'], message.data
                     )
 
                     # Append to batch for stream
-                    batch.append(message.model_dump(exclude_none=True))
+                    batch.append(message)
                     if len(batch) >= 100:
-                        await self.redis_client.xadd_bulk(self.stream_name, batch)
-                        log.debug(
-                            f"[{self.exchange_name}] Flushed batch of {len(batch)} messages to Redis."
-                        )
+                        await self.market_data_repo.add_messages_to_stream(self.stream_name, batch)
                         batch.clear()
 
             except asyncio.CancelledError:

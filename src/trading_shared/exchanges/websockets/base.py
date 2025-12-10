@@ -4,10 +4,9 @@ from abc import ABC, abstractmethod
 from typing import AsyncGenerator
 
 # --- Shared Library Imports ---
-# These imports are now validated against the provided models.py
 from trading_engine_core.models import MarketDefinition, StreamMessage
 from ...clients.postgres_client import PostgresClient
-from ...clients.redis_client import CustomRedisClient
+from ...repositories.market_data_repository import MarketDataRepository
 
 
 class AbstractWsClient(ABC):
@@ -16,12 +15,12 @@ class AbstractWsClient(ABC):
     def __init__(
         self,
         market_definition: MarketDefinition,
-        redis_client: CustomRedisClient,
+        market_data_repo: MarketDataRepository,
         postgres_client: PostgresClient,
     ):
         self.market_def = market_definition
         self.exchange_name = market_definition.exchange
-        self.redis_client = redis_client
+        self.market_data_repo = market_data_repo
         self.postgres_client = postgres_client
         # Standardize stream name format
         self.stream_name = f"stream:market_data:{self.exchange_name}"

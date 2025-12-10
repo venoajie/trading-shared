@@ -6,6 +6,7 @@ import json
 import random
 import time
 from typing import AsyncGenerator, List, Optional, Union
+from collections import deque
 
 # --- Installed  ---
 from loguru import logger as log
@@ -14,11 +15,11 @@ import websockets
 from pydantic import SecretStr
 
 # --- Local Application Imports ---
-from ...clients.redis_client import CustomRedisClient
 from ...clients.postgres_client import PostgresClient
 from ...config.models import ExchangeSettings
 from ...exchanges.trading.deribit_constants import WebsocketParameters
 from ...repositories.instrument_repository import InstrumentRepository
+from ...repositories.market_data_repository import MarketDataRepository
 from .base import AbstractWsClient
 
 # --- Shared Library Imports  ---
@@ -30,10 +31,10 @@ class DeribitWsClient(AbstractWsClient):
         self,
         market_definition: MarketDefinition,
         postgres_client: PostgresClient,
-        redis_client: CustomRedisClient,
+        market_data_repo: MarketDataRepository,
         settings: ExchangeSettings,
     ):
-        super().__init__(market_definition, redis_client, postgres_client)
+        super().__init__(market_definition, market_data_repo, postgres_client)
         self.settings = settings
         self._is_running = asyncio.Event()
         self.ws_connection_url = self.market_def.ws_base_url
@@ -201,25 +202,22 @@ class DeribitWsClient(AbstractWsClient):
 
         while self._is_running.is_set():
             try:
-                batch = []
+                batch = deque()
                 async for message in self.connect():
                     if not self._is_running.is_set():
                         break
 
                     reconnect_attempts = 0
-                    batch.append(message.model_dump(exclude_none=True))
+                    batch.append(message)
 
                     if len(batch) >= 100:
                         is_flushed = False
                         while not is_flushed:
                             try:
-                                await self.redis_client.xadd_bulk(
+                                await self.market_data_repo.add_messages_to_stream(
                                     self.stream_name, batch
                                 )
                                 is_flushed = True
-                                log.debug(
-                                    f"[{self.exchange_name}] Flushed batch of {len(batch)} messages."
-                                )
                                 batch.clear()
                             except ConnectionError:
                                 log.error(
