@@ -2,20 +2,28 @@
 
 # --- Built Ins  ---
 import asyncio
+from typing import Dict, Any, Optional, Union
 
 # --- Installed  ---
 import aiohttp
 from loguru import logger as log
+from pydantic import SecretStr
 
 # --- Shared Library Imports  ---
 from trading_engine_core.models import SystemAlert, TradeNotification
+
+def _get_secret_value(secret: Union[SecretStr, str]) -> str:
+    """Safely gets the string value from a SecretStr or a plain str."""
+    if isinstance(secret, SecretStr):
+        return secret.get_secret_value()
+    return secret
 
 
 class NotificationManager:
     def __init__(
         self,
         session: aiohttp.ClientSession,
-        telegram_token: str = None,
+        telegram_token: str = Union[str, SecretStr],
         telegram_chat_id: str = None,
     ):
         """
@@ -29,7 +37,7 @@ class NotificationManager:
 
         if telegram_token and telegram_chat_id:
             self.enabled = True
-            self._base_url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
+            self._base_url = f"https://api.telegram.org/bot{_get_secret_value(telegram_token)}/sendMessage"
             log.info("Telegram notifications are enabled.")
         else:
             log.warning(
