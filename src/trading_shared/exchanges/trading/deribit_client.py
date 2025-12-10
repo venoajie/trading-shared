@@ -90,10 +90,9 @@ class DeribitTradingClient:
         if not self._session:
             raise ConnectionError("Session not established. Call connect() first.")
 
-        # CORRECTED: Use the helper to unwrap secrets before passing to the library.
         auth_params = {
             "grant_type": "client_credentials",
-            "client_id": self._get_secret_value(self._client_id),
+            "client_id": (self._client_id),
             "client_secret": self._get_secret_value(self._client_secret),
         }
         url = f"{self._base_url}/public/auth"
