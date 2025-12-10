@@ -1,70 +1,50 @@
 # src/trading_shared/exchanges/public/base.py
 
-# --- Built Ins  ---
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any
 
-# --- Installed ---
-import aiohttp
-
-# --- Shared Library Imports ---
-from ...config.models import ExchangeSettings
-
-
 class PublicExchangeClient(ABC):
     """
-    Defines the standard interface for a public REST API client.
-    This contract is used by services like Janitor and Backfill.
+    An abstract base class defining the contract for all public-facing REST API clients.
+    Any concrete implementation of this class must provide methods for fetching
+    instruments and OHLC data.
     """
-
-    def __init__(self, settings: ExchangeSettings, http_session: aiohttp.ClientSession):
-        self.settings = settings
-        self.http_session = http_session
-        self.base_url = settings.rest_url
-        if not self.base_url:
-            raise ValueError(f"REST URL for {type(self).__name__} is not configured.")
 
     @abstractmethod
     async def connect(self):
         """
-        A placeholder for any initial connection or setup logic.
-        This method SHOULD NOT create a new session.
+        Handles any necessary setup for the client. For clients using a shared
+        HTTP session, this may be a no-op.
         """
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     async def close(self):
         """
-        A placeholder for any cleanup logic.
-        This method MUST NOT close the shared http_session, as its lifecycle
-        is managed by the service that created it.
+        Handles any necessary cleanup for the client. For clients using a shared
+        HTTP session, this may be a no-op.
         """
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     async def get_instruments(self, currencies: List[str]) -> List[Dict[str, Any]]:
-        """Fetches all relevant instruments for the exchange for a list of currencies."""
-        pass
+        """
+        Fetches all relevant instruments from the exchange.
+        Should return the raw instrument data, which will be transformed upstream.
+        """
+        raise NotImplementedError
 
     @abstractmethod
-    async def get_historical_ohlc(
+    async def get_public_ohlc(
         self,
-        instrument: str,
-        start_ts: int,
-        end_ts: int,
+        instrument_name: str,
         resolution: str,
-        market_type: str,
-    ) -> Dict[str, Any]:
-        """Fetches historical OHLC data for an instrument."""
-        pass
-
-    @abstractmethod
-    async def get_public_trades(
-        self,
-        instrument: str,
-        start_ts: int,
-        end_ts: int,
-        market_type: str,
+        start_timestamp_ms: int,
+        limit: int = 1000,
     ) -> List[Dict[str, Any]]:
-        """Fetches historical public trades for a given instrument."""
-        pass
+        """
+        Fetches OHLC (k-line) data for a symbol. This method is expected to handle
+        any necessary API pagination to retrieve a complete dataset from the start time.
+        The returned data must be in the canonical application format.
+        """
+        raise NotImplementedError
