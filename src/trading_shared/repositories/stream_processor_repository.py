@@ -1,15 +1,10 @@
-
 # src/trading_shared/repositories/stream_processor_repository.py
 
 # --- Built Ins ---
 from typing import List, Dict, Any
 
-# --- Installed ---
-from loguru import logger as log
-
 # --- Shared Library Imports ---
 from trading_shared.clients.redis_client import CustomRedisClient
-from shared_config.constants import ServiceConstants
 
 class StreamProcessorRepository:
     """
@@ -19,7 +14,11 @@ class StreamProcessorRepository:
     def __init__(self, redis_client: CustomRedisClient):
         self._redis = redis_client
 
-    async def ensure_consumer_group(self, stream_name: str, group_name: str):
+    async def ensure_consumer_group(
+        self, 
+        stream_name: str, 
+        group_name: str,
+        ):
         """Ensures a consumer group exists for a given stream."""
         await self._redis.ensure_consumer_group(stream_name, group_name)
 
@@ -64,14 +63,24 @@ class StreamProcessorRepository:
             stream_name, group_name, consumer_name, min_idle_time_ms, count
         )
 
-    async def publish_state_change(self):
-        """Publishes a generic state change notification."""
-        await self._redis.publish(ServiceConstants.REDIS_STATE_CHANGE_CHANNEL, "{}")
+    async def publish_state_change(
+        self, 
+        channel_name: str,
+        ): 
+        """Publishes a generic state change notification to a specified channel."""
+        await self._redis.publish(channel_name, "{}")
 
-    async def move_to_dlq(self, stream_name: str, failed_messages: List[Dict[str, Any]]):
+    async def move_to_dlq(
+        self, 
+        stream_name: str, 
+        failed_messages: List[Dict[str, Any]],
+        ):
         """Moves a list of failed messages to the DLQ stream."""
         await self._redis.xadd_to_dlq(stream_name, failed_messages)
 
-    def parse_stream_message(self, message_data: dict[bytes, bytes]) -> dict:
+    def parse_stream_message(
+        self, 
+        message_data: dict[bytes, bytes],
+        ) -> dict:
         """Helper method to parse raw stream message data."""
         return self._redis.parse_stream_message(message_data)
