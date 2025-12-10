@@ -11,7 +11,7 @@ from loguru import logger as log
 
 # --- Shared Library Imports ---
 from .base import PublicExchangeClient
-from ..trading.binance_constants import BinanceMarketType
+from .binance_constants import BinanceMarketType
 from ...config.models import ExchangeSettings
 
 class BinancePublicClient(PublicExchangeClient):
