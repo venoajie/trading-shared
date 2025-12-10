@@ -11,7 +11,7 @@ from loguru import logger as log
 
 # --- Shared Library Imports ---
 from .base import PublicExchangeClient
-from .binance_constants import BinanceMarketType
+from ..trading.binance_constants import BinanceMarketType
 from ...config.models import ExchangeSettings
 
 
@@ -23,29 +23,21 @@ class BinancePublicClient(PublicExchangeClient):
 
     def __init__(self, settings: ExchangeSettings, http_session: aiohttp.ClientSession):
         super().__init__()
-        if not settings.rest_url:
-            raise ValueError("Binance rest_url not configured.")
-        self.base_url = settings.rest_url
         self.http_session = http_session
-        self.spot_url = f"{self.base_url}/api/v3"
-        self.linear_futures_url = f"{self.base_url}/fapi/v1"
-        self.inverse_futures_url = f"{self.base_url}/dapi/v1"
+        self.spot_url = "https://api.binance.com/api/v3"
+        self.linear_futures_url = "https://fapi.binance.com/fapi/v1"
+        self.inverse_futures_url = "https://dapi.binance.com/dapi/v1"
 
     def _get_api_url_for_instrument(self, instrument_name: str) -> str:
         """Determines the correct API base URL (spot or futures) for a given instrument."""
-        # This is a simplified stand-in for a more robust detection method
-        # that should exist in a complete implementation.
         market_type = self.get_market_type_from_instrument_name(instrument_name)
-        
-        # Using the Enum for a safe, explicit comparison
         if market_type == BinanceMarketType.FUTURES_USD_M:
             return self.linear_futures_url
-        
         return self.spot_url
 
     # A placeholder for the detection logic mentioned above
     def get_market_type_from_instrument_name(self, instrument_name: str) -> BinanceMarketType:
-        if instrument_name.endswith("PERP"):
+        if "PERP" in instrument_name:
             return BinanceMarketType.FUTURES_USD_M
         return BinanceMarketType.SPOT
         
@@ -86,7 +78,7 @@ class BinancePublicClient(PublicExchangeClient):
         
         for i in range(self._SAFETY_FETCH_LIMIT):
             params = {
-                "symbol": instrument_name.replace("/", ""), # API needs "BTCUSDT", not "BTC/USDT"
+                "symbol": instrument_name.replace("/", ""), 
                 "interval": resolution,
                 "startTime": next_start_time_ms,
                 "limit": limit,
@@ -160,8 +152,8 @@ class BinancePublicClient(PublicExchangeClient):
         pass
 
     async def close(self):
-        """The shared session is managed externally. This method is a no-op."""
-        pass
+            """The shared session is managed externally. This method is a no-op."""
+            pass
 
     async def _get_raw_exchange_info_for_market(
         self, market_type_url: str, market_type_name: str
@@ -173,7 +165,6 @@ class BinancePublicClient(PublicExchangeClient):
                 response.raise_for_status()
                 data = await response.json()
                 raw_instruments = data.get("symbols", [])
-                # Inject the market_type_hint required for downstream transformation.
                 for inst in raw_instruments:
                     inst["market_type_hint"] = market_type_name
                 return raw_instruments
