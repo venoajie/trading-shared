@@ -3,8 +3,13 @@
 # --- Built Ins ---
 from typing import List, Dict, Any
 
+# --- Installed  ---
+from loguru import logger as log
+import orjson
+
 # --- Shared Library Imports ---
 from trading_shared.clients.redis_client import CustomRedisClient
+
 
 class StreamProcessorRepository:
     """
@@ -15,10 +20,10 @@ class StreamProcessorRepository:
         self._redis = redis_client
 
     async def ensure_consumer_group(
-        self, 
-        stream_name: str, 
+        self,
+        stream_name: str,
         group_name: str,
-        ):
+    ):
         """Ensures a consumer group exists for a given stream."""
         await self._redis.ensure_consumer_group(stream_name, group_name)
 
@@ -64,23 +69,29 @@ class StreamProcessorRepository:
         )
 
     async def publish_state_change(
-        self, 
+        self,
         channel_name: str,
-        ): 
+    ):
         """Publishes a generic state change notification to a specified channel."""
         await self._redis.publish(channel_name, "{}")
 
     async def move_to_dlq(
-        self, 
-        stream_name: str, 
+        self,
+        stream_name: str,
         failed_messages: List[Dict[str, Any]],
-        ):
+    ):
         """Moves a list of failed messages to the DLQ stream."""
         await self._redis.xadd_to_dlq(stream_name, failed_messages)
 
     def parse_stream_message(
-        self, 
+        self,
         message_data: dict[bytes, bytes],
-        ) -> dict:
+    ) -> dict:
         """Helper method to parse raw stream message data."""
         return self._redis.parse_stream_message(message_data)
+
+    async def enqueue_malformed_trade(self, trade_data: Dict):
+        """Pushes a trade that failed processing to a dead-letter queue."""
+        dlq_key = "dlq:malformed_trades"
+        log.critical(f"Moving malformed trade to DLQ '{dlq_key}': {trade_data}")
+        await self._redis.lpush(dlq_key, orjson.dumps(trade_data))

@@ -19,6 +19,7 @@ class BinancePublicClient(PublicExchangeClient):
     """
     Client for Binance's public REST API endpoints.
     """
+
     _SAFETY_FETCH_LIMIT = 50  # Max number of paginated calls for a single request
 
     def __init__(self, settings: ExchangeSettings, http_session: aiohttp.ClientSession):
@@ -36,11 +37,13 @@ class BinancePublicClient(PublicExchangeClient):
         return self.spot_url
 
     # A placeholder for the detection logic mentioned above
-    def get_market_type_from_instrument_name(self, instrument_name: str) -> BinanceMarketType:
+    def get_market_type_from_instrument_name(
+        self, instrument_name: str
+    ) -> BinanceMarketType:
         if "PERP" in instrument_name:
             return BinanceMarketType.FUTURES_USD_M
         return BinanceMarketType.SPOT
-        
+
     def _transform_candle_data_to_canonical(
         self,
         raw_candle: list,
@@ -75,22 +78,26 @@ class BinancePublicClient(PublicExchangeClient):
         """
         all_candles = []
         next_start_time_ms = start_timestamp_ms
-        
+
         for i in range(self._SAFETY_FETCH_LIMIT):
             params = {
-                "symbol": instrument_name.replace("/", ""), 
+                "symbol": instrument_name.replace("/", ""),
                 "interval": resolution,
                 "startTime": next_start_time_ms,
                 "limit": limit,
             }
-            
+
             try:
-                async with self.http_session.get(f"{api_url}/klines", params=params) as response:
+                async with self.http_session.get(
+                    f"{api_url}/klines", params=params
+                ) as response:
                     response.raise_for_status()
                     raw_candles = await response.json()
 
                     if not raw_candles:
-                        log.info(f"[{instrument_name}] No more candles returned. Pagination complete.")
+                        log.info(
+                            f"[{instrument_name}] No more candles returned. Pagination complete."
+                        )
                         break
 
                     candles = [
@@ -104,23 +111,31 @@ class BinancePublicClient(PublicExchangeClient):
                     last_candle_timestamp = candles[-1]["tick"]
                     next_start_time_ms = last_candle_timestamp + 1
 
-                    log.debug(f"Fetched {len(candles)} candles for {instrument_name}. Next fetch starts at {next_start_time_ms}.")
+                    log.debug(
+                        f"Fetched {len(candles)} candles for {instrument_name}. Next fetch starts at {next_start_time_ms}."
+                    )
 
                     if len(raw_candles) < limit:
-                        log.info(f"[{instrument_name}] Reached end of available data. Pagination complete.")
+                        log.info(
+                            f"[{instrument_name}] Reached end of available data. Pagination complete."
+                        )
                         break
 
-                    await asyncio.sleep(0.2) 
+                    await asyncio.sleep(0.2)
 
             except aiohttp.ClientError as e:
                 log.error(f"API call failed for {instrument_name}: {e}")
                 break
             except Exception:
-                log.exception(f"An unexpected error occurred during OHLC fetch for {instrument_name}")
+                log.exception(
+                    f"An unexpected error occurred during OHLC fetch for {instrument_name}"
+                )
                 break
-        
+
         if i == self._SAFETY_FETCH_LIMIT - 1:
-            log.warning(f"Hit safety fetch limit for {instrument_name}. More data may be available.")
+            log.warning(
+                f"Hit safety fetch limit for {instrument_name}. More data may be available."
+            )
 
         return all_candles
 
@@ -138,13 +153,13 @@ class BinancePublicClient(PublicExchangeClient):
         """
         api_url = self._get_api_url_for_instrument(instrument_name)
         log.info(f"Starting paginated OHLC fetch for {instrument_name} on {api_url}...")
-        
+
         return await self._perform_paginated_ohlc_fetch(
             api_url=api_url,
             instrument_name=instrument_name,
             resolution=resolution,
             start_timestamp_ms=start_timestamp_ms,
-            limit=limit
+            limit=limit,
         )
 
     async def connect(self):
@@ -152,8 +167,8 @@ class BinancePublicClient(PublicExchangeClient):
         pass
 
     async def close(self):
-            """The shared session is managed externally. This method is a no-op."""
-            pass
+        """The shared session is managed externally. This method is a no-op."""
+        pass
 
     async def _get_raw_exchange_info_for_market(
         self, market_type_url: str, market_type_name: str
@@ -190,7 +205,11 @@ class BinancePublicClient(PublicExchangeClient):
         ]
         results_by_market = await asyncio.gather(*tasks)
 
-        all_instruments = [inst for market_list in results_by_market for inst in market_list]
+        all_instruments = [
+            inst for market_list in results_by_market for inst in market_list
+        ]
 
-        log.success(f"[BinancePublicClient] Total raw instruments fetched: {len(all_instruments)}")
+        log.success(
+            f"[BinancePublicClient] Total raw instruments fetched: {len(all_instruments)}"
+        )
         return all_instruments

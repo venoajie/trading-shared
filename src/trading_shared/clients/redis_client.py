@@ -509,8 +509,12 @@ class CustomRedisClient:
 
     async def delete(self, key: str):
         """Deletes a key from Redis."""
-        return await self._execute_resiliently(lambda pool: pool.delete(key), f"DELETE {key}")
+        return await self._execute_resiliently(
+            lambda pool: pool.delete(key), f"DELETE {key}"
+        )
 
     async def llen(self, key: str) -> int:
         """Returns the length of a list in Redis."""
-        return await self._execute_resiliently(lambda pool: pool.llen(key), f"LLEN {key}")
+        return await self._execute_resiliently(
+            lambda pool: pool.llen(key), f"LLEN {key}"
+        )

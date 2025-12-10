@@ -2,7 +2,7 @@
 
 [project]
 name = "trading-shared"
-version = "0.7.7"
+version = "0.7.8"
 description = "Consolidated shared clients and utilities for the trading platform."
 
 dependencies = [

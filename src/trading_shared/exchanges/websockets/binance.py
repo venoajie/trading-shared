@@ -1,4 +1,3 @@
-
 # src\trading_shared\exchanges\websockets\binance.py
 
 # --- Built Ins  ---
@@ -47,7 +46,7 @@ class BinanceWsClient(AbstractWsClient):
         self._is_running = asyncio.Event()
         self._control_channel = f"control:{self.market_def.market_id}:subscriptions"
         self.settings = settings
-        self.redis_client = redis_client # Keep for pub/sub listener
+        self.redis_client = redis_client  # Keep for pub/sub listener
 
         if not self._control_channel:
             raise ValueError("Binance subscription control channel not configured.")
@@ -202,13 +201,15 @@ class BinanceWsClient(AbstractWsClient):
 
                     # Update Redis ticker snapshot
                     await self.market_data_repo.cache_ticker(
-                        message.data['symbol'], message.data
+                        message.data["symbol"], message.data
                     )
 
                     # Append to batch for stream
                     batch.append(message)
                     if len(batch) >= 100:
-                        await self.market_data_repo.add_messages_to_stream(self.stream_name, batch)
+                        await self.market_data_repo.add_messages_to_stream(
+                            self.stream_name, batch
+                        )
                         batch.clear()
 
             except asyncio.CancelledError:

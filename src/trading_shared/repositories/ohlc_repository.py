@@ -67,4 +67,4 @@ class OhlcRepository:
             candle_data["close"],
             candle_data["volume"],
             candle_data.get("open_interest"),
-            )
+        )

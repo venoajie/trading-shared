@@ -3,6 +3,7 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any
 
+
 class PublicExchangeClient(ABC):
     """
     An abstract base class defining the contract for all public-facing REST API clients.

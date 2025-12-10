@@ -30,12 +30,14 @@ class MarketDataRepository:
         """Adds a batch of messages to a Redis stream."""
         if not messages:
             return
-        
+
         # Convert Pydantic models to dicts for xadd_bulk
         message_dicts = [msg.model_dump(exclude_none=True) for msg in messages]
-        
+
         await self._redis.xadd_bulk(stream_name, message_dicts, maxlen=maxlen)
-        log.debug(f"Flushed batch of {len(messages)} messages to Redis stream '{stream_name}'.")
+        log.debug(
+            f"Flushed batch of {len(messages)} messages to Redis stream '{stream_name}'."
+        )
 
     async def cache_ticker(self, symbol: str, data: Dict):
         """Caches the latest ticker data in a Redis hash."""
