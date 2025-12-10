@@ -1,7 +1,7 @@
 # src/trading_shared/repositories/market_data_repository.py
 
 # --- Built Ins ---
-from typing import List, Dict, Deque
+from typing import List, Dict, Deque, Any
 from collections import deque
 
 # --- Installed ---
@@ -9,8 +9,8 @@ import orjson
 from loguru import logger as log
 
 # --- Shared Library Imports ---
-from trading_shared.clients.redis_client import CustomRedisClient
 from trading_engine_core.models import StreamMessage
+from trading_shared.clients.redis_client import CustomRedisClient
 
 
 class MarketDataRepository:
@@ -43,3 +43,21 @@ class MarketDataRepository:
         """Caches the latest ticker data in a Redis hash."""
         redis_key = f"ticker:{symbol}"
         await self._redis.hset(redis_key, "payload", orjson.dumps(data))
+
+    async def get_ticker_data(
+        self,
+        instrument_name: str,
+    ) -> dict[str, Any] | None:
+        """Retrieves and decodes ticker data from a Redis hash."""
+        key = f"ticker:{instrument_name}"
+        try:
+            payload = await self._redis.hget(key, "payload")
+            if not payload:
+                return None
+            return orjson.loads(payload)
+        except orjson.JSONDecodeError as e:
+            log.error(
+                f"Failed to decode ticker data for '{instrument_name}'. "
+                f"Possible data corruption in Redis key '{key}'. Error: {e}"
+            )
+            return None

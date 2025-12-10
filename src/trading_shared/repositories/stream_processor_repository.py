@@ -2,10 +2,12 @@
 
 # --- Built Ins ---
 from typing import List, Dict, Any
+from datetime import datetime, timezone
 
 # --- Installed  ---
 from loguru import logger as log
 import orjson
+import redis.asyncio as aioredis
 
 # --- Shared Library Imports ---
 from trading_shared.clients.redis_client import CustomRedisClient
@@ -89,6 +91,42 @@ class StreamProcessorRepository:
     ) -> dict:
         """Helper method to parse raw stream message data."""
         return self._redis.parse_stream_message(message_data)
+
+    async def move_message_to_dlq_and_ack(
+        self,
+        source_stream: str,
+        source_group: str,
+        message_id: str,
+        message_data: dict,
+        error: str,
+    ):
+        """
+        Atomically moves a single failed message's contents to a DLQ stream
+        and ACKs the original message to prevent reprocessing.
+        """
+        dlq_stream = f"dlq:{source_stream}"
+        log.warning(
+            f"Moving failed message {message_id} from '{source_stream}' to DLQ '{dlq_stream}'"
+        )
+        failed_message_payload = {
+            "original_message_id": message_id,
+            "original_stream": source_stream,
+            "error": error,
+            "failed_at": datetime.now(timezone.utc).isoformat(),
+            "payload": {
+                k.decode("utf-8"): v.decode("utf-8") for k, v in message_data.items()
+            },
+        }
+
+        async def command(pool: aioredis.Redis):
+            pipe = pool.pipeline()
+            pipe.xadd(dlq_stream, {"payload": orjson.dumps(failed_message_payload)})
+            pipe.xack(source_stream, source_group, message_id)
+            await pipe.execute()
+
+        # Accessing the "private" _execute_resiliently is a pragmatic choice here
+        # to ensure this critical operation has the same resilience as direct client calls.
+        await self._redis._execute_resiliently(command, "move_to_dlq_and_ack")
 
     async def enqueue_malformed_trade(self, trade_data: Dict):
         """Pushes a trade that failed processing to a dead-letter queue."""

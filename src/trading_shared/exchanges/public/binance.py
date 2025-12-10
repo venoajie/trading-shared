@@ -14,6 +14,7 @@ from .base import PublicExchangeClient
 from .binance_constants import BinanceMarketType
 from ...config.models import ExchangeSettings
 
+
 class BinancePublicClient(PublicExchangeClient):
     """
     Client for Binance's public REST API endpoints.

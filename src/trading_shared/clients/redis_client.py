@@ -350,29 +350,6 @@ class CustomRedisClient:
             log.error(f"An unexpected error occurred during XAUTOCLAIM: {e}")
             raise
 
-    async def get_ticker_data(
-        self,
-        instrument_name: str,
-    ) -> dict[str, Any] | None:
-        key = f"ticker:{instrument_name}"
-        try:
-            payload = await self._execute_resiliently(
-                lambda pool: pool.hget(key, "payload"), "hget"
-            )
-            if not payload:
-                return None
-            return orjson.loads(payload)
-        # ConnectionError is already handled and raised by _execute_resiliently.
-        # It should be caught by the service logic, not here.
-        except orjson.JSONDecodeError as e:
-            log.error(
-                f"Failed to decode ticker data for '{instrument_name}'. "
-                f"Possible data corruption in Redis key '{key}'. Error: {e}"
-            )
-            # Re-raise as a more specific application-level exception or return None,
-            # but do not swallow other unexpected errors.
-            return None
-
     async def get_system_state(self) -> str:
         try:
             state = await self._execute_resiliently(
@@ -437,6 +414,12 @@ class CustomRedisClient:
 
         await self._execute_resiliently(command, f"SET {key}")
 
+    async def hget(self, name: str, key: str) -> Optional[bytes]:
+        async def command(conn: aioredis.Redis):
+            return await conn.hget(name, key)
+
+        return await self._execute_resiliently(command, f"HGET {name}")
+
     async def hset(self, name: str, key: str, value: Any):
         async def command(conn: aioredis.Redis):
             await conn.hset(name, key, value)
@@ -473,39 +456,6 @@ class CustomRedisClient:
         return await self._execute_resiliently(
             lambda pool: pool.brpop(key, timeout=timeout), f"BRPOP {key}"
         )
-
-    async def move_to_dlq(
-        self,
-        source_stream: str,
-        source_group: str,
-        message_id: str,
-        message_data: dict,
-        error: str,
-    ):
-        """
-        Atomically moves a message's contents to a DLQ stream and ACKs the original.
-        """
-        dlq_stream = f"dlq:{source_stream}"
-        log.warning(
-            f"Moving failed message {message_id} from '{source_stream}' to DLQ '{dlq_stream}'"
-        )
-        failed_message_payload = {
-            "original_message_id": message_id,
-            "original_stream": source_stream,
-            "error": error,
-            "failed_at": datetime.now(timezone.utc).isoformat(),
-            "payload": {
-                k.decode("utf-8"): v.decode("utf-8") for k, v in message_data.items()
-            },
-        }
-
-        async def command(pool: aioredis.Redis):
-            pipe = pool.pipeline()
-            pipe.xadd(dlq_stream, {"payload": orjson.dumps(failed_message_payload)})
-            pipe.xack(source_stream, source_group, message_id)
-            await pipe.execute()
-
-        await self._execute_resiliently(command, "move_to_dlq")
 
     async def delete(self, key: str):
         """Deletes a key from Redis."""
