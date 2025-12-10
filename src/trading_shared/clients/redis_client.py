@@ -41,7 +41,7 @@ class CustomRedisClient:
         public method for explicit connection setup.
         """
         await self._get_pool()
-        
+
     async def __aenter__(self):
         """Allows the client to be used as an async context manager."""
         await self._get_pool()  # Ensure connection is established on entry
@@ -122,7 +122,6 @@ class CustomRedisClient:
             raise ConnectionError(
                 f"Redis connection failed after 5 attempts: {last_error}"
             )
-
 
     async def close(self):
         """

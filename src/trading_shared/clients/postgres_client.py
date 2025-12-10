@@ -197,7 +197,7 @@ class PostgresClient:
         instruments_with_exchange = [
             {**inst, "exchange": exchange_name} for inst in instruments
         ]
-        
+
         async def command(conn: asyncpg.Connection):
             # The 'instruments' list of dicts is automatically encoded to JSONB[].
             await conn.execute(

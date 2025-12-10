@@ -44,14 +44,20 @@ async def managed_resources(resources: Iterable[Any]) -> AsyncGenerator[None, No
             resource_name = type(resource).__name__
             try:
                 # Prioritize the standard __aexit__ protocol.
-                if hasattr(resource, "__aexit__") and callable(getattr(resource, "__aexit__")):
+                if hasattr(resource, "__aexit__") and callable(
+                    getattr(resource, "__aexit__")
+                ):
                     await resource.__aexit__(None, None, None)
                 # Fallback to the .close() convention.
-                elif hasattr(resource, "close") and callable(getattr(resource, "close")):
+                elif hasattr(resource, "close") and callable(
+                    getattr(resource, "close")
+                ):
                     await resource.close()
                 # If no cleanup method is found, do nothing.
                 else:
-                    log.trace(f"Resource '{resource_name}' has no cleanup method (__aexit__ or close). Skipping.")
+                    log.trace(
+                        f"Resource '{resource_name}' has no cleanup method (__aexit__ or close). Skipping."
+                    )
 
             except Exception:
                 # Log but do not re-raise. Ensures a failure in closing one

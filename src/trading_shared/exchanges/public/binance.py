@@ -19,10 +19,10 @@ class BinancePublicClient(PublicExchangeClient):
     conforming to the PublicExchangeClient interface."""
 
     def __init__(
-        self, 
-        settings: ExchangeSettings, 
+        self,
+        settings: ExchangeSettings,
         http_session: aiohttp.ClientSession,
-        ):
+    ):
         super().__init__(settings, http_session)
         self.spot_url = "https://api.binance.com/api/v3"
         self.linear_futures_url = "https://fapi.binance.com/fapi/v1"
@@ -35,7 +35,7 @@ class BinancePublicClient(PublicExchangeClient):
     async def close(self):
         """The shared session is managed externally. This method is a no-op."""
         pass
-    
+
     async def _get_raw_exchange_info_for_market(
         self, market_type: str
     ) -> List[Dict[str, Any]]:
@@ -130,7 +130,9 @@ class BinancePublicClient(PublicExchangeClient):
         try:
             url = f"{base_url}{endpoint}"
             log.debug(f"Requesting OHLC from: {url} with params: {params}")
-            async with self.http_session.get(url, params=params, timeout=30) as response:
+            async with self.http_session.get(
+                url, params=params, timeout=30
+            ) as response:
                 response.raise_for_status()
                 data = await response.json()
                 return {

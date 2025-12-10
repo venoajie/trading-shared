@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any
 
 # --- Installed ---
-import aiohttp 
+import aiohttp
 
 # --- Shared Library Imports ---
 from ...config.models import ExchangeSettings

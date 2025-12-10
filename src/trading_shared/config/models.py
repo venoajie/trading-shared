@@ -7,13 +7,13 @@ from typing import Optional
 from pydantic import BaseModel, Field, computed_field, SecretStr
 from urllib.parse import quote_plus
 
+
 class RedisSettings(BaseModel):
     url: str
     db: int
     password: Optional[SecretStr] = None
     write_concurrency_limit: int = Field(
-        default=4,
-        description="Concurrency limit for bulk write operations to Redis."
+        default=4, description="Concurrency limit for bulk write operations to Redis."
     )
 
 
@@ -27,11 +27,11 @@ class PostgresSettings(BaseModel):
     @computed_field
     @property
     def dsn(self) -> str:
-        """Computes the DSN string for asyncpg."""       
+        """Computes the DSN string for asyncpg."""
         encoded_user = quote_plus(self.user)
         encoded_password = quote_plus(self.password.get_secret_value())
         return f"postgresql://{encoded_user}:{encoded_password}@{self.host}:{self.port}/{self.db}"
-        #return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.db}"
+        # return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.db}"
 
 
 class ExchangeSettings(BaseModel):

@@ -2,7 +2,7 @@
 
 # --- Built Ins  ---
 import asyncio
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional
 import time
 from functools import wraps
 
@@ -10,7 +10,6 @@ from functools import wraps
 import aiohttp
 from loguru import logger as log
 import orjson
-from pydantic import SecretStr
 
 # --- Local Application Imports ---
 from ...config.models import ExchangeSettings
@@ -30,35 +29,35 @@ class DeribitTradingClient:
         self,
         settings: ExchangeSettings,
         client_id: str,
-        client_secret: Union[str, SecretStr],
+        client_secret: str,
     ):
-        # Store credentials without assumption of type.
-        self._client_id = client_id
-        self._client_secret = client_secret
+        self.client_id = client_id
+        self.client_secret = client_secret
         self._settings = settings
         self.exchange_name = "deribit"
         self._session: Optional[aiohttp.ClientSession] = None
-        self._base_url = (
-            self._settings.rest_url + "/api/v2"
-            if self._settings.rest_url
-            else "https://www.deribit.com/api/v2"
-        )
+        self._base_url = "https://www.deribit.com/api/v2"
         self._access_token: Optional[str] = None
         self._auth_lock = asyncio.Lock()
         log.info("Deribit API client initialized for production use.")
 
-    def _get_secret_value(self, secret: Union[SecretStr, str]) -> str:
-        """Safely gets the string value from a SecretStr or a plain str."""
-        if isinstance(secret, SecretStr):
-            return secret.get_secret_value()
-        return secret
-
     def _ensure_authenticated(func):
+        """
+        Decorator that transparently handles token expiration and retries the
+        decorated function once upon failure.
+        """
+
         @wraps(func)
-        async def wrapper(self, *args, **kwargs):
+        async def wrapper(
+            self,
+            *args,
+            **kwargs,
+        ):
             try:
+                # First attempt to execute the function
                 return await func(self, *args, **kwargs)
             except TokenExpiredError:
+                # If the token is expired, acquire the lock to prevent multiple concurrent re-logins
                 async with self._auth_lock:
                     log.warning(
                         f"Access token expired during call to '{func.__name__}'. Re-authenticating."
@@ -67,6 +66,7 @@ class DeribitTradingClient:
                     log.info(
                         f"Re-authentication successful. Retrying call to '{func.__name__}'."
                     )
+                    # Second and final attempt after re-login
                     return await func(self, *args, **kwargs)
 
         return wrapper
@@ -74,27 +74,30 @@ class DeribitTradingClient:
     # --- CORE CONNECTION AND AUTH METHODS (NOT DECORATED) ---
 
     async def connect(self):
+        """Establishes the aiohttp client session and authenticates."""
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(
                 json_serialize=lambda data: orjson.dumps(data).decode()
             )
             log.info("Aiohttp session established for Deribit API.")
+            # Initial login on connect
             await self.login()
 
     async def close(self):
+        """Gracefully closes the aiohttp client session."""
         if self._session and not self._session.closed:
             await self._session.close()
             log.info("Aiohttp session for Deribit API closed.")
 
     async def login(self):
+        """Authenticates with the Deribit API to get a bearer token."""
         if not self._session:
             raise ConnectionError("Session not established. Call connect() first.")
 
-        # CORRECTED: Use the helper to unwrap secrets before passing to the library.
         auth_params = {
             "grant_type": "client_credentials",
-            "client_id": self._get_secret_value(self._client_id),
-            "client_secret": self._get_secret_value(self._client_secret),
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
         }
         url = f"{self._base_url}/public/auth"
         log.info("Attempting to authenticate with Deribit...")
@@ -119,8 +122,14 @@ class DeribitTradingClient:
     # --- SINGLE, ROBUST INTERNAL REQUEST METHOD ---
 
     async def _perform_request(
-        self, method: str, params: Dict[str, Any]
+        self,
+        method: str,
+        params: Dict[str, Any],
     ) -> Dict[str, Any]:
+        """
+        Internal helper to execute a single API request.
+        This method is now the single point of failure and exception generation.
+        """
         if not method.startswith("public/") and not self._access_token:
             raise ConnectionError("Not authenticated for private API call.")
         if not self._session or self._session.closed:
@@ -139,13 +148,15 @@ class DeribitTradingClient:
         }
 
         async with self._session.post(
-            self._base_url, json=payload, headers=headers
+            self._base_url,
+            json=payload,
+            headers=headers,
         ) as response:
             data = await response.json()
             if response.status == 400 and data.get("error", {}).get("code") == 13009:
                 raise TokenExpiredError(f"Token expired for method {method}")
 
-            response.raise_for_status()
+            response.raise_for_status()  # Raise exceptions for other HTTP errors (e.g., 500)
 
             if "error" in data:
                 log.error(f"Deribit API Error for method {method}: {data['error']}")
@@ -156,9 +167,14 @@ class DeribitTradingClient:
     # --- PUBLIC API METHODS (DECORATED) ---
 
     async def get_instruments(
-        self, currency: str, kind: str = "future", expired: bool = False
+        self,
+        currency: str,
+        kind: str = "future",
+        expired: bool = False,
     ) -> Dict[str, Any]:
+        """Fetches all instruments for a given currency and kind."""
         log.info(f"[API CALL] Fetching {kind} instruments for currency: {currency}")
+
         return await self._perform_request(
             ApiMethods.GET_INSTRUMENTS,
             {"currency": currency, "kind": kind, "expired": expired},

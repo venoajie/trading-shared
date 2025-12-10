@@ -44,7 +44,9 @@ class DeribitPublicClient(PublicExchangeClient):
         url = f"{self.base_url}/api/v2/{endpoint}"
         try:
             # The get() call will raise ClientError if the session is closed.
-            async with self.http_session.get(url, params=params, timeout=20) as response:
+            async with self.http_session.get(
+                url, params=params, timeout=20
+            ) as response:
                 response.raise_for_status()
                 data = await response.json()
                 if isinstance(data, dict):
@@ -52,16 +54,14 @@ class DeribitPublicClient(PublicExchangeClient):
                 return data.get("result", [])
         except aiohttp.ClientError as e:
             # More specific catch for aiohttp-related issues, including a closed session.
-            log.error(
-                f"Failed to fetch from Deribit public endpoint {endpoint}: {e}"
-            )
+            log.error(f"Failed to fetch from Deribit public endpoint {endpoint}: {e}")
             return [] if not endpoint.endswith("chart_data") else {}
         except Exception as e:
             log.error(
                 f"An unexpected error occurred for Deribit endpoint {endpoint}: {e}"
             )
             return [] if not endpoint.endswith("chart_data") else {}
-        
+
     async def get_instruments(
         self,
         currencies: List[str],
