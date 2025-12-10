@@ -2,7 +2,7 @@
 
 # --- Built Ins  ---
 import asyncio
-import time
+import time, datetime, timezone
 from collections import deque
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar, Optional
@@ -531,3 +531,34 @@ class CustomRedisClient:
         return await self._execute_resiliently(
             lambda pool: pool.brpop(key, timeout=timeout), f"BRPOP {key}"
         )
+
+    async def move_to_dlq(
+        self,
+        source_stream: str,
+        source_group: str,
+        message_id: str,
+        message_data: dict,
+        error: str,
+    ):
+        """
+        Atomically moves a message's contents to a DLQ stream and ACKs the original.
+        """
+        dlq_stream = f"dlq:{source_stream}"
+        log.warning(
+            f"Moving failed message {message_id} from '{source_stream}' to DLQ '{dlq_stream}'"
+        )
+        failed_message_payload = {
+            "original_message_id": message_id,
+            "original_stream": source_stream,
+            "error": error,
+            "failed_at": datetime.now(timezone.utc).isoformat(),
+            "payload": {
+                k.decode("utf-8"): v.decode("utf-8") for k, v in message_data.items()
+            },
+        }
+        async def command(pool: aioredis.Redis):
+            pipe = pool.pipeline()
+            pipe.xadd(dlq_stream, {"payload": orjson.dumps(failed_message_payload)})
+            pipe.xack(source_stream, source_group, message_id)
+            await pipe.execute()
+        await self._execute_resiliently(command, "move_to_dlq")
