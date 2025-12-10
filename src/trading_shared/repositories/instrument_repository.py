@@ -7,7 +7,7 @@ from typing import List, Dict, Any
 import asyncpg
 
 # --- Local Application Imports ---
-from ...clients.postgres_client import PostgresClient
+from trading_shared.clients.postgres_client import PostgresClient
 
 
 class InstrumentRepository:
