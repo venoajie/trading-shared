@@ -4,6 +4,7 @@
 import asyncio
 import time
 from datetime import datetime, timezone
+from contextlib import asynccontextmanager
 from collections import deque
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar, Optional
@@ -122,7 +123,7 @@ class CustomRedisClient:
             await self._safe_close_pool()
             log.info("Redis connection pool closed.")
 
-    async def _execute_resiliently(
+    async def execute_resiliently(
         self,
         func: Callable[[aioredis.Redis], Awaitable[T]],
         command_name_for_logging: str,
@@ -160,6 +161,18 @@ class CustomRedisClient:
             f"Failed to execute Redis command '{command_name_for_logging}' after retries."
         ) from last_exception
 
+    @asynccontextmanager
+    async def pubsub(self) -> aioredis.PubSub:
+        """
+        Provides a managed PubSub object that guarantees connection cleanup.
+        """
+        pool = await self._get_pool()
+        pubsub_conn = pool.pubsub()
+        try:
+            yield pubsub_conn
+        finally:
+            await pubsub_conn.close()
+            
     @staticmethod
     def parse_stream_message(message_data: dict[bytes, bytes]) -> dict:
         result = {}
@@ -215,7 +228,7 @@ class CustomRedisClient:
                             )
                         await pipe.execute()
 
-                await self._execute_resiliently(command, "pipeline.execute(xadd)")
+                await self.execute_resiliently(command, "pipeline.execute(xadd)")
             # Only catch the final, definitive ConnectionError from the resilient wrapper.
             except ConnectionError as e:
                 log.error(
@@ -243,7 +256,7 @@ class CustomRedisClient:
                     )
                 await pipe.execute()
 
-            await self._execute_resiliently(command, "pipeline.execute(xadd_dlq)")
+            await self.execute_resiliently(command, "pipeline.execute(xadd_dlq)")
             log.warning(
                 f"{len(failed_messages)} message(s) moved to DLQ stream "
                 f"'{dlq_stream_name}'"
@@ -259,7 +272,7 @@ class CustomRedisClient:
         group_name: str,
     ):
         try:
-            await self._execute_resiliently(
+            await self.execute_resiliently(
                 lambda pool: pool.xgroup_create(
                     stream_name,
                     group_name,
@@ -307,7 +320,7 @@ class CustomRedisClient:
                         return []
                     raise
 
-            return await self._execute_resiliently(command, "xreadgroup")
+            return await self.execute_resiliently(command, "xreadgroup")
         except ConnectionError as e:
             raise ConnectionError("Redis connection failed during XREADGROUP") from e
 
@@ -319,7 +332,7 @@ class CustomRedisClient:
     ) -> None:
         if not message_ids:
             return
-        await self._execute_resiliently(
+        await self.execute_resiliently(
             lambda pool: pool.xack(stream_name, group_name, *message_ids), "xack"
         )
 
@@ -332,7 +345,7 @@ class CustomRedisClient:
         count: int = 100,
     ) -> tuple[bytes, list]:
         try:
-            return await self._execute_resiliently(
+            return await self.execute_resiliently(
                 lambda pool: pool.xautoclaim(
                     name=stream_name,
                     groupname=group_name,
@@ -352,12 +365,12 @@ class CustomRedisClient:
 
     async def get_system_state(self) -> str:
         try:
-            state = await self._execute_resiliently(
+            state = await self.execute_resiliently(
                 lambda pool: pool.get("system:state:simple"), "get"
             )
             if state:
                 return state.decode()
-            old_state = await self._execute_resiliently(
+            old_state = await self.execute_resiliently(
                 lambda pool: pool.get("system:state"), "get"
             )
             return old_state.decode() if old_state else "LOCKED"
@@ -384,7 +397,7 @@ class CustomRedisClient:
                 await pool.hset("system:state", mapping=state_data)
                 await pool.set("system:state:simple", state)
 
-            await self._execute_resiliently(command, "hset/set")
+            await self.execute_resiliently(command, "hset/set")
             log_message = f"System state transitioned to: {state.upper()}"
             if reason:
                 log_message += f" (Reason: {reason})"
@@ -398,7 +411,7 @@ class CustomRedisClient:
         async def command(conn: aioredis.Redis) -> bytes | None:
             return await conn.get(key)
 
-        return await self._execute_resiliently(command, f"GET {key}")
+        return await self.execute_resiliently(command, f"GET {key}")
 
     async def publish(self, channel: str, message: str | bytes):
         """Publishes a message to a channel."""
@@ -406,25 +419,25 @@ class CustomRedisClient:
         async def command(conn: aioredis.Redis):
             return await conn.publish(channel, message)
 
-        await self._execute_resiliently(command, f"PUBLISH {channel}")
+        await self.execute_resiliently(command, f"PUBLISH {channel}")
 
     async def set(self, key: str, value: str, ex: int | None = None):
         async def command(conn: aioredis.Redis):
             await conn.set(key, value, ex=ex)
 
-        await self._execute_resiliently(command, f"SET {key}")
+        await self.execute_resiliently(command, f"SET {key}")
 
     async def hget(self, name: str, key: str) -> Optional[bytes]:
         async def command(conn: aioredis.Redis):
             return await conn.hget(name, key)
 
-        return await self._execute_resiliently(command, f"HGET {name}")
+        return await self.execute_resiliently(command, f"HGET {name}")
 
     async def hset(self, name: str, key: str, value: Any):
         async def command(conn: aioredis.Redis):
             await conn.hset(name, key, value)
 
-        await self._execute_resiliently(command, f"HSET {name}")
+        await self.execute_resiliently(command, f"HSET {name}")
 
     async def xadd(
         self,
@@ -445,26 +458,26 @@ class CustomRedisClient:
                 name, encoded_fields, maxlen=maxlen, approximate=approximate
             )
 
-        await self._execute_resiliently(command, f"XADD {name}")
+        await self.execute_resiliently(command, f"XADD {name}")
 
     async def lpush(self, key: str, value: str | bytes):
-        return await self._execute_resiliently(
+        return await self.execute_resiliently(
             lambda pool: pool.lpush(key, value), f"LPUSH {key}"
         )
 
     async def brpop(self, key: str, timeout: int) -> tuple[bytes, bytes] | None:
-        return await self._execute_resiliently(
+        return await self.execute_resiliently(
             lambda pool: pool.brpop(key, timeout=timeout), f"BRPOP {key}"
         )
 
     async def delete(self, key: str):
         """Deletes a key from Redis."""
-        return await self._execute_resiliently(
+        return await self.execute_resiliently(
             lambda pool: pool.delete(key), f"DELETE {key}"
         )
 
     async def llen(self, key: str) -> int:
         """Returns the length of a list in Redis."""
-        return await self._execute_resiliently(
+        return await self.execute_resiliently(
             lambda pool: pool.llen(key), f"LLEN {key}"
         )

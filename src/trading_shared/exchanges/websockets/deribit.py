@@ -38,13 +38,17 @@ class DeribitWsClient(AbstractWsClient):
         redis_client: Optional[CustomRedisClient] = None,
     ):
         # Redis_client is now passed to the base class
-        super().__init__(market_definition, market_data_repo, postgres_client, redis_client)
+        super().__init__(
+            market_definition, market_data_repo, postgres_client, redis_client
+        )
         self.settings = settings
         self.subscription_scope = subscription_scope.lower()
 
         # Validate dependencies based on scope
         if self.subscription_scope == "private" and not self.redis_client:
-            raise ValueError("DeribitWsClient in 'private' scope requires a redis_client.")
+            raise ValueError(
+                "DeribitWsClient in 'private' scope requires a redis_client."
+            )
         if not self.settings.client_id or not self.settings.client_secret:
             raise ValueError("Deribit client_id and client_secret must be configured.")
 
@@ -108,11 +112,13 @@ class DeribitWsClient(AbstractWsClient):
     async def _subscribe(self):
         """Subscribes to channels based on the client's scope."""
         channels = []
-        method = "public/subscribe" # Default for public scope
+        method = "public/subscribe"  # Default for public scope
 
         if self.subscription_scope == "public":
             if not await self._load_instruments():
-                log.error(f"[{self.exchange_name}] Instrument loading failed. Cannot subscribe.")
+                log.error(
+                    f"[{self.exchange_name}] Instrument loading failed. Cannot subscribe."
+                )
                 return
             for instrument in self.instrument_names:
                 channels.append(f"incremental_ticker.{instrument}")
@@ -122,7 +128,9 @@ class DeribitWsClient(AbstractWsClient):
             channels = ["user.orders.any.any.raw", "user.trades.any.any.raw"]
 
         if not channels:
-            log.warning(f"[{self.exchange_name}] No channels to subscribe to for scope '{self.subscription_scope}'.")
+            log.warning(
+                f"[{self.exchange_name}] No channels to subscribe to for scope '{self.subscription_scope}'."
+            )
             return
 
         # Chunking for large subscription lists (primarily for public scope)
@@ -194,7 +202,7 @@ class DeribitWsClient(AbstractWsClient):
                                 log.error(
                                     f"[{self.exchange_name}] Authentication failed: {data['error']}"
                                 )
-                                return # Fatal error, stop the generator
+                                return  # Fatal error, stop the generator
                             log.success(
                                 f"[{self.exchange_name}] Authentication successful."
                             )
@@ -208,7 +216,7 @@ class DeribitWsClient(AbstractWsClient):
                     # On the first non-control message after connecting, subscribe.
                     if is_authenticated and self.subscription_scope == "public":
                         await self._subscribe()
-                        is_authenticated = False # Prevent re-subscribing
+                        is_authenticated = False  # Prevent re-subscribing
 
                     params = data.get("params")
                     if (
@@ -292,15 +300,11 @@ class DeribitWsClient(AbstractWsClient):
         )
 
     async def close(self):
-        log.info(
-            f"[{self.exchange_name}][{self.subscription_scope}] Closing client..."
-        )
+        log.info(f"[{self.exchange_name}][{self.subscription_scope}] Closing client...")
         self._is_running.clear()
         if self.websocket_client:
             try:
                 await self.websocket_client.close()
             except websockets.exceptions.ConnectionClosed:
                 pass
-        log.info(
-            f"[{self.exchange_name}][{self.subscription_scope}] Client closed."
-        )
+        log.info(f"[{self.exchange_name}][{self.subscription_scope}] Client closed.")

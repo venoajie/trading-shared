@@ -1,7 +1,7 @@
 # src/trading_shared/repositories/stream_processor_repository.py
 
 # --- Built Ins ---
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Union
 from datetime import datetime, timezone
 
 # --- Installed  ---
@@ -12,6 +12,12 @@ import redis.asyncio as aioredis
 # --- Shared Library Imports ---
 from trading_shared.clients.redis_client import CustomRedisClient
 
+def _safe_decode(value: bytes) -> Union[str, bytes]:
+    """Attempts to decode a byte string as UTF-8, returning raw bytes on failure."""
+    try:
+        return value.decode("utf-8")
+    except UnicodeDecodeError:
+        return value
 
 class StreamProcessorRepository:
     """
@@ -108,14 +114,18 @@ class StreamProcessorRepository:
         log.warning(
             f"Moving failed message {message_id} from '{source_stream}' to DLQ '{dlq_stream}'"
         )
+        
+        # Perform safe decoding
+        safely_decoded_payload = {
+            _safe_decode(k): _safe_decode(v) for k, v in message_data.items()
+        }
+
         failed_message_payload = {
             "original_message_id": message_id,
             "original_stream": source_stream,
             "error": error,
             "failed_at": datetime.now(timezone.utc).isoformat(),
-            "payload": {
-                k.decode("utf-8"): v.decode("utf-8") for k, v in message_data.items()
-            },
+            "payload": safely_decoded_payload,
         }
 
         async def command(pool: aioredis.Redis):
@@ -124,10 +134,9 @@ class StreamProcessorRepository:
             pipe.xack(source_stream, source_group, message_id)
             await pipe.execute()
 
-        # Accessing the "private" _execute_resiliently is a pragmatic choice here
-        # to ensure this critical operation has the same resilience as direct client calls.
-        await self._redis._execute_resiliently(command, "move_to_dlq_and_ack")
-
+        # Call the public method, not the private one.
+        await self._redis.execute_resiliently(command, "move_to_dlq_and_ack")
+        
     async def enqueue_malformed_trade(self, trade_data: Dict):
         """Pushes a trade that failed processing to a dead-letter queue."""
         dlq_key = "dlq:malformed_trades"
