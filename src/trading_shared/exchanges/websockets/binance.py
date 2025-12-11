@@ -15,6 +15,7 @@ from .base import AbstractWsClient
 from ...clients.postgres_client import PostgresClient
 from ...clients.redis_client import CustomRedisClient
 from ...config.models import ExchangeSettings
+from ...repositories.instrument_repository import InstrumentRepository
 from ...repositories.market_data_repository import MarketDataRepository
 
 # --- Shared Library Imports  ---
@@ -30,13 +31,15 @@ class BinanceWsClient(AbstractWsClient):
     def __init__(
         self,
         market_definition: MarketDefinition,
-        postgres_client: PostgresClient,
+        instrument_repo: InstrumentRepository,
         redis_client: CustomRedisClient,
         market_data_repo: MarketDataRepository,
         settings: ExchangeSettings,
         initial_subscriptions: List[str] | None = None,
     ):
-        super().__init__(market_definition, market_data_repo, postgres_client)
+        super().__init__(
+            market_definition, market_data_repo, instrument_repo, redis_client
+        )
         self.ws_connection_url = self.market_def.ws_base_url
         self._subscriptions: Set[str] = (
             set(initial_subscriptions) if initial_subscriptions else set()
@@ -45,8 +48,9 @@ class BinanceWsClient(AbstractWsClient):
         self._is_running = asyncio.Event()
         self._control_channel = f"control:{self.market_def.market_id}:subscriptions"
         self.settings = settings
-        self.redis_client = redis_client  # Keep for pub/sub listener
-
+        # The redis_client is now handled by the base class, but we keep the
+        # reference here as this class has specific pub/sub logic.
+        self.redis_client = redis_client
         if not self._control_channel:
             raise ValueError("Binance subscription control channel not configured.")
 
@@ -69,53 +73,50 @@ class BinanceWsClient(AbstractWsClient):
         log.info(
             f"Listening for subscription commands on Redis channel: '{self._control_channel}'"
         )
-        pool = await self.redis_client.get_pool()
-        pubsub = pool.pubsub()
-        await pubsub.subscribe(self._control_channel)
+        async with self.redis_client.pubsub() as pubsub:
+            await pubsub.subscribe(self._control_channel)
+            while self._is_running.is_set():
+                try:
+                    message = await pubsub.get_message(
+                        ignore_subscribe_messages=True, timeout=1.0
+                    )
+                    if not message:
+                        continue
 
-        while self._is_running.is_set():
-            try:
-                message = await pubsub.get_message(
-                    ignore_subscribe_messages=True, timeout=1.0
-                )
-                if not message:
-                    continue
+                    log.info(f"Received command on control channel: {message['data']}")
+                    command = orjson.loads(message["data"])
+                    action = command.get("action")
+                    symbols_to_modify = command.get("symbols", [])
 
-                log.info(f"Received command on control channel: {message['data']}")
-                command = orjson.loads(message["data"])
-                action = command.get("action")
-                # Correctly handle symbol format which is now a simple list of strings
-                symbols_to_modify = command.get("symbols", [])
+                    if not symbols_to_modify:
+                        continue
 
-                if not symbols_to_modify:
-                    continue
-
-                # The symbols from initial_subscriptions are already in the correct format (e.g., "btcusdt@trade")
-                # A more robust solution would be to define the stream type in config. Assuming 'aggTrade' for now.
-                streams_to_modify = [
-                    f"{symbol.lower().split('@')[0]}@aggTrade"
-                    for symbol in symbols_to_modify
-                ]
-
-                if action == "subscribe":
-                    new_subs = [
-                        s for s in streams_to_modify if s not in self._subscriptions
+                    streams_to_modify = [
+                        f"{symbol.lower().split('@')[0]}@aggTrade"
+                        for symbol in symbols_to_modify
                     ]
-                    if new_subs:
-                        await self._send_subscription_request("SUBSCRIBE", new_subs)
-                        self._subscriptions.update(new_subs)
 
-                elif action == "unsubscribe":
-                    old_subs = [
-                        s for s in streams_to_modify if s in self._subscriptions
-                    ]
-                    if old_subs:
-                        await self._send_subscription_request("UNSUBSCRIBE", old_subs)
-                        self._subscriptions.difference_update(old_subs)
+                    if action == "subscribe":
+                        new_subs = [
+                            s for s in streams_to_modify if s not in self._subscriptions
+                        ]
+                        if new_subs:
+                            await self._send_subscription_request("SUBSCRIBE", new_subs)
+                            self._subscriptions.update(new_subs)
 
-            except Exception as e:
-                log.error(f"Error in control channel listener: {e}", exc_info=True)
-                await asyncio.sleep(5)
+                    elif action == "unsubscribe":
+                        old_subs = [
+                            s for s in streams_to_modify if s in self._subscriptions
+                        ]
+                        if old_subs:
+                            await self._send_subscription_request("UNSUBSCRIBE", old_subs)
+                            self._subscriptions.difference_update(old_subs)
+
+                except asyncio.CancelledError:
+                    break # Graceful shutdown
+                except Exception as e:
+                    log.error(f"Error in control channel listener: {e}", exc_info=True)
+                    await asyncio.sleep(5)
 
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
         """
