@@ -9,6 +9,7 @@ from ...clients.redis_client import CustomRedisClient
 from ...repositories.instrument_repository import InstrumentRepository
 from ...repositories.market_data_repository import MarketDataRepository
 
+
 class AbstractWsClient(ABC):
     """An abstract base class for exchange WebSocket clients."""
 

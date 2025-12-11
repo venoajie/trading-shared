@@ -109,11 +109,13 @@ class BinanceWsClient(AbstractWsClient):
                             s for s in streams_to_modify if s in self._subscriptions
                         ]
                         if old_subs:
-                            await self._send_subscription_request("UNSUBSCRIBE", old_subs)
+                            await self._send_subscription_request(
+                                "UNSUBSCRIBE", old_subs
+                            )
                             self._subscriptions.difference_update(old_subs)
 
                 except asyncio.CancelledError:
-                    break # Graceful shutdown
+                    break  # Graceful shutdown
                 except Exception as e:
                     log.error(f"Error in control channel listener: {e}", exc_info=True)
                     await asyncio.sleep(5)
