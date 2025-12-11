@@ -1,20 +1,20 @@
-# src\trading_shared\clients\redis_client.py
+# src/trading_shared/clients/redis_client.py
 
 # --- Built Ins  ---
 import asyncio
-import time
-from datetime import datetime, timezone
-from contextlib import asynccontextmanager
-from collections import deque
-from collections.abc import Awaitable, Callable
-from typing import Any, TypeVar, Optional
 import socket
+import time
+from collections.abc import Awaitable, Callable
+from collections import deque
+from contextlib import asynccontextmanager
+from typing import Any, Optional, TypeVar
 
 # --- Installed  ---
 import orjson
 import redis.asyncio as aioredis
 from loguru import logger as log
 from redis import exceptions as redis_exceptions
+from redis.asyncio.client import PubSub
 
 # --- Local Application Imports ---
 from ..config.models import RedisSettings
@@ -43,7 +43,7 @@ class CustomRedisClient:
 
     async def __aenter__(self):
         """Allows the client to be used as an async context manager."""
-        await self._get_pool()  # Ensure connection is established on entry
+        await self._get_pool()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -73,7 +73,6 @@ class CustomRedisClient:
                     raise ConnectionError("Redis unavailable - circuit breaker open")
                 self._circuit_open = False
 
-            # Connection attempt logic is now simplified; retries are handled by the resilient executor
             try:
                 password_value = (
                     self._settings.password.get_secret_value()
@@ -149,7 +148,6 @@ class CustomRedisClient:
                     f"(attempt {attempt + 1}/{max_retries}): {e}"
                 )
                 last_exception = e
-                # Invalidate the pool on any connection-related failure to force re-establishment
                 await self._safe_close_pool()
                 if attempt < max_retries - 1:
                     await asyncio.sleep(initial_delay * (2**attempt))
@@ -162,7 +160,7 @@ class CustomRedisClient:
         ) from last_exception
 
     @asynccontextmanager
-    async def pubsub(self) -> aioredis.PubSub:
+    async def pubsub(self) -> PubSub:
         """
         Provides a managed PubSub object that guarantees connection cleanup.
         """
@@ -172,7 +170,7 @@ class CustomRedisClient:
             yield pubsub_conn
         finally:
             await pubsub_conn.close()
-
+            
     @staticmethod
     def parse_stream_message(message_data: dict[bytes, bytes]) -> dict:
         result = {}
