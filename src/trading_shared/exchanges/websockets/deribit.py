@@ -18,6 +18,7 @@ from pydantic import SecretStr
 from ...clients.postgres_client import PostgresClient
 from ...clients.redis_client import CustomRedisClient
 from ...config.models import ExchangeSettings
+from ...repositories.instrument_repository import InstrumentRepository
 from ...repositories.market_data_repository import MarketDataRepository
 from .base import AbstractWsClient
 
@@ -30,7 +31,8 @@ EXCHANGE_EVENTS_STREAM = "stream:exchange_events:deribit"
 class DeribitWsClient(AbstractWsClient):
     def __init__(
         self,
-        market_definition: MarketDefinition,
+        market_definition: MarketDefinition,        
+        instrument_repo: InstrumentRepository,
         postgres_client: PostgresClient,
         market_data_repo: MarketDataRepository,
         settings: ExchangeSettings,
@@ -38,7 +40,7 @@ class DeribitWsClient(AbstractWsClient):
         redis_client: Optional[CustomRedisClient] = None,
     ):
         super().__init__(
-            market_definition, market_data_repo, postgres_client, redis_client
+            market_definition, market_data_repo, instrument_repo, redis_client
         )
         self.settings = settings
         self.subscription_scope = subscription_scope.lower()
@@ -82,8 +84,8 @@ class DeribitWsClient(AbstractWsClient):
     async def _load_instruments(self) -> bool:
         # This is only required for public subscriptions
         if not self.instrument_names:
-            try:
-                records = await self.postgres_client.fetch_instruments_by_exchange(
+            try:                
+                records = await self.instrument_repo.fetch_by_exchange(
                     self.exchange_name
                 )
                 self.instrument_names = [
