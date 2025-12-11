@@ -5,10 +5,9 @@ from typing import AsyncGenerator, Optional
 
 # --- Shared Library Imports ---
 from trading_engine_core.models import MarketDefinition, StreamMessage
+from ...clients.redis_client import CustomRedisClient
+from ...repositories.instrument_repository import InstrumentRepository
 from ...repositories.market_data_repository import MarketDataRepository
-from ....clients.redis_client import CustomRedisClient
-from ....repositories.instrument_repository import InstrumentRepository
-
 
 class AbstractWsClient(ABC):
     """An abstract base class for exchange WebSocket clients."""
@@ -26,6 +25,7 @@ class AbstractWsClient(ABC):
         self.instrument_repo = instrument_repo
         self.redis_client = redis_client
         self.stream_name = f"stream:market_data:{self.exchange_name}"
+
     @abstractmethod
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
         """Connects, authenticates, subscribes, and yields canonical StreamMessage objects."""

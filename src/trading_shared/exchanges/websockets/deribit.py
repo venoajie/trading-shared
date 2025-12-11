@@ -15,7 +15,6 @@ import websockets
 from pydantic import SecretStr
 
 # --- Local Application Imports ---
-from ...clients.postgres_client import PostgresClient
 from ...clients.redis_client import CustomRedisClient
 from ...config.models import ExchangeSettings
 from ...repositories.instrument_repository import InstrumentRepository
@@ -31,9 +30,8 @@ EXCHANGE_EVENTS_STREAM = "stream:exchange_events:deribit"
 class DeribitWsClient(AbstractWsClient):
     def __init__(
         self,
-        market_definition: MarketDefinition,        
+        market_definition: MarketDefinition,
         instrument_repo: InstrumentRepository,
-        postgres_client: PostgresClient,
         market_data_repo: MarketDataRepository,
         settings: ExchangeSettings,
         subscription_scope: str = "public",
@@ -84,7 +82,7 @@ class DeribitWsClient(AbstractWsClient):
     async def _load_instruments(self) -> bool:
         # This is only required for public subscriptions
         if not self.instrument_names:
-            try:                
+            try:
                 records = await self.instrument_repo.fetch_by_exchange(
                     self.exchange_name
                 )
