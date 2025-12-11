@@ -12,12 +12,14 @@ import redis.asyncio as aioredis
 # --- Shared Library Imports ---
 from trading_shared.clients.redis_client import CustomRedisClient
 
+
 def _safe_decode(value: bytes) -> Union[str, bytes]:
     """Attempts to decode a byte string as UTF-8, returning raw bytes on failure."""
     try:
         return value.decode("utf-8")
     except UnicodeDecodeError:
         return value
+
 
 class StreamProcessorRepository:
     """
@@ -114,7 +116,7 @@ class StreamProcessorRepository:
         log.warning(
             f"Moving failed message {message_id} from '{source_stream}' to DLQ '{dlq_stream}'"
         )
-        
+
         # Perform safe decoding
         safely_decoded_payload = {
             _safe_decode(k): _safe_decode(v) for k, v in message_data.items()
@@ -136,7 +138,7 @@ class StreamProcessorRepository:
 
         # Call the public method, not the private one.
         await self._redis.execute_resiliently(command, "move_to_dlq_and_ack")
-        
+
     async def enqueue_malformed_trade(self, trade_data: Dict):
         """Pushes a trade that failed processing to a dead-letter queue."""
         dlq_key = "dlq:malformed_trades"

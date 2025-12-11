@@ -172,7 +172,7 @@ class CustomRedisClient:
             yield pubsub_conn
         finally:
             await pubsub_conn.close()
-            
+
     @staticmethod
     def parse_stream_message(message_data: dict[bytes, bytes]) -> dict:
         result = {}
