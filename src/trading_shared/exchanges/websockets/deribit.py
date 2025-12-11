@@ -5,8 +5,8 @@ import asyncio
 import json
 import random
 import time
-from typing import AsyncGenerator, List, Optional, Union
 from collections import deque
+from typing import AsyncGenerator, List, Optional, Union
 
 # --- Installed  ---
 from loguru import logger as log
@@ -24,6 +24,7 @@ from .base import AbstractWsClient
 # --- Shared Library Imports  ---
 from trading_engine_core.models import StreamMessage, MarketDefinition
 
+EXCHANGE_EVENTS_STREAM = "stream:exchange_events:deribit"
 
 class DeribitWsClient(AbstractWsClient):
     def __init__(
@@ -32,34 +33,26 @@ class DeribitWsClient(AbstractWsClient):
         postgres_client: PostgresClient,
         market_data_repo: MarketDataRepository,
         settings: ExchangeSettings,
-        # Parameter to control client behavior
         subscription_scope: str = "public",
-        # MODIFICATION: Redis client is now a direct dependency for stream writing
         redis_client: Optional[CustomRedisClient] = None,
     ):
-        # Redis_client is now passed to the base class
-        super().__init__(
-            market_definition, market_data_repo, postgres_client, redis_client
-        )
+        super().__init__(market_definition, market_data_repo, postgres_client, redis_client)
         self.settings = settings
         self.subscription_scope = subscription_scope.lower()
 
-        # Validate dependencies based on scope
         if self.subscription_scope == "private" and not self.redis_client:
-            raise ValueError(
-                "DeribitWsClient in 'private' scope requires a redis_client."
-            )
+            raise ValueError("DeribitWsClient in 'private' scope requires a redis_client.")
         if not self.settings.client_id or not self.settings.client_secret:
             raise ValueError("Deribit client_id and client_secret must be configured.")
 
-        # Stream name is now determined by the scope
         if self.subscription_scope == "public":
             self.stream_name = f"stream:market_data:{self.exchange_name}"
         elif self.subscription_scope == "private":
-            self.stream_name = f"stream:exchange_events:{self.exchange_name}"
+            # Use the constant for internal consistency.
+            self.stream_name = EXCHANGE_EVENTS_STREAM
         else:
             raise ValueError(f"Invalid subscription_scope: '{self.subscription_scope}'")
-
+        
         self._is_running = asyncio.Event()
         self.ws_connection_url = self.market_def.ws_base_url
         if not self.ws_connection_url:
