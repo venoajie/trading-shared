@@ -34,8 +34,7 @@ class BinanceWsClient(AbstractWsClient):
         redis_client: CustomRedisClient,
         market_data_repo: MarketDataRepository,
         settings: ExchangeSettings,
-        initial_subscriptions: List[str]
-        | None = None,  # MODIFIED: Added parameter for initial state
+        initial_subscriptions: List[str] | None = None,
     ):
         super().__init__(market_definition, market_data_repo, postgres_client)
         self.ws_connection_url = self.market_def.ws_base_url

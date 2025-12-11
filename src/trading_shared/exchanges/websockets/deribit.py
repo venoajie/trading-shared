@@ -26,6 +26,7 @@ from trading_engine_core.models import StreamMessage, MarketDefinition
 
 EXCHANGE_EVENTS_STREAM = "stream:exchange_events:deribit"
 
+
 class DeribitWsClient(AbstractWsClient):
     def __init__(
         self,
@@ -36,12 +37,16 @@ class DeribitWsClient(AbstractWsClient):
         subscription_scope: str = "public",
         redis_client: Optional[CustomRedisClient] = None,
     ):
-        super().__init__(market_definition, market_data_repo, postgres_client, redis_client)
+        super().__init__(
+            market_definition, market_data_repo, postgres_client, redis_client
+        )
         self.settings = settings
         self.subscription_scope = subscription_scope.lower()
 
         if self.subscription_scope == "private" and not self.redis_client:
-            raise ValueError("DeribitWsClient in 'private' scope requires a redis_client.")
+            raise ValueError(
+                "DeribitWsClient in 'private' scope requires a redis_client."
+            )
         if not self.settings.client_id or not self.settings.client_secret:
             raise ValueError("Deribit client_id and client_secret must be configured.")
 
@@ -52,7 +57,7 @@ class DeribitWsClient(AbstractWsClient):
             self.stream_name = EXCHANGE_EVENTS_STREAM
         else:
             raise ValueError(f"Invalid subscription_scope: '{self.subscription_scope}'")
-        
+
         self._is_running = asyncio.Event()
         self.ws_connection_url = self.market_def.ws_base_url
         if not self.ws_connection_url:

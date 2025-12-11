@@ -5,6 +5,7 @@ from typing import List, Dict, Any
 
 # --- Installed  ---
 import asyncpg
+from loguru import logger as log
 
 # --- Local Application Imports ---
 from trading_shared.clients.postgres_client import PostgresClient
@@ -17,18 +18,11 @@ class InstrumentRepository:
     async def fetch_all(self) -> List[asyncpg.Record]:
         return await self._db.fetch("SELECT * FROM v_instruments")
 
-    async def fetch_by_exchange(
-        self,
-        exchange_name: str,
-    ) -> List[asyncpg.Record]:
+    async def fetch_by_exchange(self, exchange_name: str) -> List[asyncpg.Record]:
         query = "SELECT * FROM v_instruments WHERE exchange = $1"
         return await self._db.fetch(query, exchange_name)
 
-    async def bulk_upsert(
-        self,
-        instruments: List[Dict[str, Any]],
-        exchange_name: str,
-    ):
+    async def bulk_upsert(self, instruments: List[Dict[str, Any]], exchange_name: str):
         if not instruments:
             return
         instruments_with_exchange = [
@@ -37,4 +31,7 @@ class InstrumentRepository:
         await self._db.execute(
             "SELECT bulk_upsert_instruments($1::jsonb[])",
             instruments_with_exchange,
+        )
+        log.info(
+            f"Successfully bulk-upserted {len(instruments)} instruments for '{exchange_name}'."
         )
