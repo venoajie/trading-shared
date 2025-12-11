@@ -16,9 +16,8 @@ from pydantic import SecretStr
 
 # --- Local Application Imports ---
 from ...clients.postgres_client import PostgresClient
+from ...clients.redis_client import CustomRedisClient
 from ...config.models import ExchangeSettings
-from ...exchanges.trading.deribit_constants import WebsocketParameters
-from ...repositories.instrument_repository import InstrumentRepository
 from ...repositories.market_data_repository import MarketDataRepository
 from .base import AbstractWsClient
 
@@ -33,24 +32,41 @@ class DeribitWsClient(AbstractWsClient):
         postgres_client: PostgresClient,
         market_data_repo: MarketDataRepository,
         settings: ExchangeSettings,
+        # Parameter to control client behavior
+        subscription_scope: str = "public",
+        # MODIFICATION: Redis client is now a direct dependency for stream writing
+        redis_client: Optional[CustomRedisClient] = None,
     ):
-        super().__init__(market_definition, market_data_repo, postgres_client)
+        # Redis_client is now passed to the base class
+        super().__init__(market_definition, market_data_repo, postgres_client, redis_client)
         self.settings = settings
+        self.subscription_scope = subscription_scope.lower()
+
+        # Validate dependencies based on scope
+        if self.subscription_scope == "private" and not self.redis_client:
+            raise ValueError("DeribitWsClient in 'private' scope requires a redis_client.")
+        if not self.settings.client_id or not self.settings.client_secret:
+            raise ValueError("Deribit client_id and client_secret must be configured.")
+
+        # Stream name is now determined by the scope
+        if self.subscription_scope == "public":
+            self.stream_name = f"stream:market_data:{self.exchange_name}"
+        elif self.subscription_scope == "private":
+            self.stream_name = f"stream:exchange_events:{self.exchange_name}"
+        else:
+            raise ValueError(f"Invalid subscription_scope: '{self.subscription_scope}'")
+
         self._is_running = asyncio.Event()
         self.ws_connection_url = self.market_def.ws_base_url
         if not self.ws_connection_url:
             raise ValueError("Deribit ws_base_url not configured in MarketDefinition.")
-        if not self.settings.client_id or not self.settings.client_secret:
-            raise ValueError("Deribit client_id and client_secret must be configured.")
 
-        # Store the credentials without making assumptions about their type yet.
         self._client_id: Union[SecretStr, str] = self.settings.client_id
         self._client_secret: Union[SecretStr, str] = self.settings.client_secret
 
         self.websocket_client: Optional[websockets.WebSocketClientProtocol] = None
         self.instrument_names: List[str] = []
 
-    # CORRECTED: Create a resilient helper to get the raw string value.
     def _get_secret_value(self, secret: Union[SecretStr, str]) -> str:
         """Safely gets the string value from a SecretStr or a plain str."""
         if isinstance(secret, SecretStr):
@@ -62,6 +78,7 @@ class DeribitWsClient(AbstractWsClient):
             await self.websocket_client.send(json.dumps(data))
 
     async def _load_instruments(self) -> bool:
+        # This is only required for public subscriptions
         if not self.instrument_names:
             try:
                 records = await self.postgres_client.fetch_instruments_by_exchange(
@@ -89,22 +106,37 @@ class DeribitWsClient(AbstractWsClient):
         return True
 
     async def _subscribe(self):
-        channels = ["user.orders.any.any.raw", "user.trades.any.any.raw"]
-        for instrument in self.instrument_names:
-            channels.append(f"incremental_ticker.{instrument}")
-            channels.append(f"chart.trades.{instrument}.1")
+        """Subscribes to channels based on the client's scope."""
+        channels = []
+        method = "public/subscribe" # Default for public scope
 
+        if self.subscription_scope == "public":
+            if not await self._load_instruments():
+                log.error(f"[{self.exchange_name}] Instrument loading failed. Cannot subscribe.")
+                return
+            for instrument in self.instrument_names:
+                channels.append(f"incremental_ticker.{instrument}")
+                channels.append(f"chart.trades.{instrument}.1")
+        elif self.subscription_scope == "private":
+            method = "private/subscribe"
+            channels = ["user.orders.any.any.raw", "user.trades.any.any.raw"]
+
+        if not channels:
+            log.warning(f"[{self.exchange_name}] No channels to subscribe to for scope '{self.subscription_scope}'.")
+            return
+
+        # Chunking for large subscription lists (primarily for public scope)
         chunk_size = 100
         for i in range(0, len(channels), chunk_size):
             chunk = channels[i : i + chunk_size]
             msg = {
                 "jsonrpc": "2.0",
                 "id": int(time.time() * 1000) + i,
-                "method": "private/subscribe",
+                "method": method,
                 "params": {"channels": chunk},
             }
             log.info(
-                f"[{self.exchange_name}] Sending subscription request for {len(chunk)} channels."
+                f"[{self.exchange_name}][{self.subscription_scope}] Sending subscription request for {len(chunk)} channels."
             )
             await self._send_json(msg)
 
@@ -125,14 +157,8 @@ class DeribitWsClient(AbstractWsClient):
         return False
 
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
-        if not await self._load_instruments():
-            log.error(
-                f"[{self.exchange_name}] Instrument loading failed. Aborting connection attempt."
-            )
-            return
-
         AUTH_ID = 9929
-        # CORRECTED: Use the resilient helper to handle both str and SecretStr.
+
         auth_msg = {
             "jsonrpc": "2.0",
             "id": AUTH_ID,
@@ -144,14 +170,17 @@ class DeribitWsClient(AbstractWsClient):
             },
         }
 
-        async with websockets.connect(self.ws_connection_url, ping_interval=None) as ws:
+        async with websockets.connect(self.ws_connection_url, ping_interval=30) as ws:
             self.websocket_client = ws
             log.info(
-                f"[{self.exchange_name}] WebSocket connection established for '{self.market_def.market_id}'."
+                f"[{self.exchange_name}][{self.subscription_scope}] WebSocket connection established."
             )
 
-            await self._send_json(auth_msg)
-            is_authenticated = False
+            # Authentication is only performed for private scope
+            is_authenticated = self.subscription_scope != "private"
+
+            if not is_authenticated:
+                await self._send_json(auth_msg)
 
             async for message in ws:
                 try:
@@ -165,9 +194,9 @@ class DeribitWsClient(AbstractWsClient):
                                 log.error(
                                     f"[{self.exchange_name}] Authentication failed: {data['error']}"
                                 )
-                                return
-                            log.info(
-                                f"[{self.exchange_name}] Authentication successful"
+                                return # Fatal error, stop the generator
+                            log.success(
+                                f"[{self.exchange_name}] Authentication successful."
                             )
                             is_authenticated = True
                             await self._subscribe()
@@ -175,6 +204,11 @@ class DeribitWsClient(AbstractWsClient):
 
                     if self._handle_control_message(data):
                         continue
+
+                    # On the first non-control message after connecting, subscribe.
+                    if is_authenticated and self.subscription_scope == "public":
+                        await self._subscribe()
+                        is_authenticated = False # Prevent re-subscribing
 
                     params = data.get("params")
                     if (
@@ -197,7 +231,7 @@ class DeribitWsClient(AbstractWsClient):
         self._is_running.set()
         reconnect_attempts = 0
         log.info(
-            f"[{self.exchange_name}] Starting message processor for '{self.market_def.market_id}'."
+            f"[{self.exchange_name}][{self.subscription_scope}] Starting message processor."
         )
 
         while self._is_running.is_set():
@@ -210,12 +244,15 @@ class DeribitWsClient(AbstractWsClient):
                     reconnect_attempts = 0
                     batch.append(message)
 
+                    # Flush logic now uses the correct repository based on scope
+                    # and is resilient to Redis connection errors.
                     if len(batch) >= 100:
                         is_flushed = False
-                        while not is_flushed:
+                        while not is_flushed and self._is_running.is_set():
                             try:
+                                # The base class now holds the correct repository instance
                                 await self.market_data_repo.add_messages_to_stream(
-                                    self.stream_name, batch
+                                    self.stream_name, list(batch)
                                 )
                                 is_flushed = True
                                 batch.clear()
@@ -224,11 +261,6 @@ class DeribitWsClient(AbstractWsClient):
                                     f"[{self.exchange_name}] Failed to flush batch to Redis. Retrying in 5s..."
                                 )
                                 await asyncio.sleep(5)
-                                if not self._is_running.is_set():
-                                    log.warning(
-                                        f"[{self.exchange_name}] Shutdown initiated during Redis retry. Discarding batch."
-                                    )
-                                    break
 
             except asyncio.CancelledError:
                 break
@@ -242,7 +274,7 @@ class DeribitWsClient(AbstractWsClient):
                 )
             except Exception:
                 log.exception(
-                    f"[{self.exchange_name}] Unhandled error in processor for '{self.market_def.market_id}'"
+                    f"[{self.exchange_name}] Unhandled error in processor for scope '{self.subscription_scope}'"
                 )
             finally:
                 if self.websocket_client:
@@ -256,12 +288,12 @@ class DeribitWsClient(AbstractWsClient):
                     await asyncio.sleep(delay)
 
         log.info(
-            f"[{self.exchange_name}] Message processor for '{self.market_def.market_id}' shut down."
+            f"[{self.exchange_name}][{self.subscription_scope}] Message processor shut down."
         )
 
     async def close(self):
         log.info(
-            f"[{self.exchange_name}] Closing client for '{self.market_def.market_id}'..."
+            f"[{self.exchange_name}][{self.subscription_scope}] Closing client..."
         )
         self._is_running.clear()
         if self.websocket_client:
@@ -270,5 +302,5 @@ class DeribitWsClient(AbstractWsClient):
             except websockets.exceptions.ConnectionClosed:
                 pass
         log.info(
-            f"[{self.exchange_name}] Client for '{self.market_def.market_id}' closed."
+            f"[{self.exchange_name}][{self.subscription_scope}] Client closed."
         )
