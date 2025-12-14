@@ -33,7 +33,11 @@ class CustomRedisClient:
         self._reconnect_attempts = 0
         self._write_sem = asyncio.Semaphore(self._settings.write_concurrency_limit)
         self._lock = asyncio.Lock()
-
+        self._pubsub_max_connections = 10  # Adjust based on needs
+        self._pubsub_pool = asyncio.Queue(maxsize=self._pubsub_max_connections)
+        self._pubsub_connections = []  # For cleanup on close
+        self._pubsub_lock = asyncio.Lock()
+        
     async def connect(self):
         """
         Ensures the connection pool is initialized. This is the standard
@@ -115,13 +119,22 @@ class CustomRedisClient:
                 ) from e
 
     async def close(self):
-        """
-        Gracefully closes the active Redis connection pool.
-        """
+        """Gracefully closes the active Redis connection pool and all pubsub connections."""
         async with self._lock:
+            # Close all pubsub connections
+            for conn in self._pubsub_connections:
+                try:
+                    await conn.close()
+                except Exception as e:
+                    log.warning(f"Error closing pubsub connection: {e}")
+            self._pubsub_connections.clear()
+            
+            # Recreate empty pool
+            self._pubsub_pool = asyncio.Queue(maxsize=self._pubsub_max_connections)
+            
             await self._safe_close_pool()
-            log.info("Redis connection pool closed.")
-
+            log.info("Redis connection pool and pubsub connections closed.")
+        
     async def execute_resiliently(
         self,
         func: Callable[[aioredis.Redis], Awaitable[T]],
@@ -164,13 +177,40 @@ class CustomRedisClient:
         """
         Provides a managed PubSub object that guarantees connection cleanup.
         """
-        pool = await self._get_pool()
-        pubsub_conn = pool.pubsub()
+            
+        # Try to get from pool first
+        try:
+            pubsub_conn = self._pubsub_pool.get_nowait()
+            log.debug("Reusing pooled PubSub connection")
+        except asyncio.QueueEmpty:
+            # Create new connection if pool is empty
+            async with self._pubsub_lock:
+                # Double-check after acquiring lock
+                try:
+                    pubsub_conn = self._pubsub_pool.get_nowait()
+                except asyncio.QueueEmpty:
+                    if len(self._pubsub_connections) < self._pubsub_max_connections:
+                        pool = await self._get_pool()
+                        pubsub_conn = pool.pubsub()
+                        self._pubsub_connections.append(pubsub_conn)
+                        log.debug(f"Created new PubSub connection (total: {len(self._pubsub_connections)})")
+                    else:
+                        # Wait for connection to become available
+                        log.debug("Waiting for available PubSub connection...")
+                        pubsub_conn = await self._pubsub_pool.get()
+        
         try:
             yield pubsub_conn
         finally:
-            await pubsub_conn.close()
-
+            # Return to pool for reuse - DO NOT CLOSE
+            try:
+                self._pubsub_pool.put_nowait(pubsub_conn)
+            except asyncio.QueueFull:
+                # This shouldn't happen with proper maxsize
+                log.warning("PubSub pool full, closing connection")
+                await pubsub_conn.close()
+                self._pubsub_connections.remove(pubsub_conn)
+                
     @staticmethod
     def parse_stream_message(message_data: dict[bytes, bytes]) -> dict:
         result = {}
