@@ -1,4 +1,3 @@
-
 # src/trading_shared/exchanges/websockets/binance.py
 
 # --- Built Ins  ---
@@ -24,8 +23,8 @@ from trading_engine_core.models import StreamMessage, MarketDefinition
 
 class BinanceWsClient(AbstractWsClient):
     """
-    A dynamic, controllable WebSocket client for Binance that manages subscriptions on-the-fly
-    via a Redis control channel. This implementation correctly implements the AbstractWsClient interface.
+    A dynamic WebSocket client for Binance. Each instance manages a single connection
+    for a chunk of instrument streams.
     """
 
     def __init__(
@@ -35,15 +34,20 @@ class BinanceWsClient(AbstractWsClient):
         redis_client: CustomRedisClient,
         market_data_repo: MarketDataRepository,
         settings: ExchangeSettings,
-        instruments_to_subscribe: List[Dict[str, Any]] | None = None,
+        instruments_to_subscribe: List[Dict[str, Any]],
+        # NEW: Suffix to identify connection chunks in logs
+        market_id_suffix: str = "",
     ):
         super().__init__(
             market_definition, market_data_repo, instrument_repo, redis_client
         )
+        # NEW: Adjust market_id for logging
+        if market_id_suffix:
+            self.market_def.market_id = f"{self.market_def.market_id}_{market_id_suffix}"
+
         self.ws_connection_url = self.market_def.ws_base_url
-        self.instruments_to_subscribe = instruments_to_subscribe or []
+        self.instruments_to_subscribe = instruments_to_subscribe
         
-        # Correctly initialize subscriptions from the dynamic list
         self._subscriptions: Set[str] = {
             f"{inst['instrument_name'].lower()}@trade"
             for inst in self.instruments_to_subscribe
@@ -56,7 +60,7 @@ class BinanceWsClient(AbstractWsClient):
         self.redis_client = redis_client
         if not self._control_channel:
             raise ValueError("Binance subscription control channel not configured.")
-
+            
     async def _send_subscription_request(
         self,
         method: str,
