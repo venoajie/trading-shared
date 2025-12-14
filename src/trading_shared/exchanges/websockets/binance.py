@@ -44,7 +44,9 @@ class BinanceWsClient(AbstractWsClient):
         )
         # Adjust market_id for logging
         if market_id_suffix:
-            self.market_def.market_id = f"{self.market_def.market_id}_{market_id_suffix}"
+            self.market_def.market_id = (
+                f"{self.market_def.market_id}_{market_id_suffix}"
+            )
 
         self.ws_connection_url = self.market_def.ws_base_url
         self.instruments_to_subscribe = instruments_to_subscribe
@@ -52,22 +54,27 @@ class BinanceWsClient(AbstractWsClient):
             f"{inst['instrument_name'].lower()}@trade"
             for inst in self.instruments_to_subscribe
         }
-        
+
+        # NEW: Set of instrument names for this chunk
+        self._chunk_instrument_names = {
+            inst["instrument_name"].lower() for inst in self.instruments_to_subscribe
+        }
+
         self._ws: websockets.WebSocketClientProtocol | None = None
         self._is_running = asyncio.Event()
-        
+
         # Set control channel (shared or per-chunk)
         if control_channel:
             self._control_channel = control_channel
         else:
-            self._control_channel = f"control:{self.market_def.market_id}:subscriptions"           
-        
+            self._control_channel = f"control:{self.market_def.market_id}:subscriptions"
+
         self.settings = settings
         self.redis_client = redis_client
         self._redis_semaphore = asyncio.Semaphore(5)  # Limit concurrent Redis ops
         if not self._control_channel:
             raise ValueError("Binance subscription control channel not configured.")
-            
+
     async def _send_subscription_request(
         self,
         method: str,
@@ -86,70 +93,76 @@ class BinanceWsClient(AbstractWsClient):
         """Listens on a Redis channel for subscription management commands."""
         log.info(
             f"Listening for subscription commands on Redis channel: '{self._control_channel}'"
-        )   
-        
-        # Use connection pooling with limit
-        redis_semaphore = asyncio.Semaphore(3)  # Limit concurrent Redis ops per chunk
-        
-        async with redis_semaphore:
-            async with self.redis_client.pubsub() as pubsub:
-                await pubsub.subscribe(self._control_channel)
-                while self._is_running.is_set():
-                    try:
-                        message = await pubsub.get_message(
-                            ignore_subscribe_messages=True, timeout=1.0
+        )
+        async with self.redis_client.pubsub() as pubsub:
+            await pubsub.subscribe(self._control_channel)
+            while self._is_running.is_set():
+                try:
+                    message = await pubsub.get_message(
+                        ignore_subscribe_messages=True, timeout=1.0
+                    )
+                    if not message:
+                        continue
+
+                    log.info(
+                        f"Received command on control channel: {message['data']}"
+                    )
+                    command = orjson.loads(message["data"])
+                    action = command.get("action")
+                    symbols_to_modify = command.get("symbols", [])
+
+                    if not symbols_to_modify:
+                        continue
+
+                    # FILTER: Only process symbols in this chunk's instrument list
+                    filtered_symbols = [
+                        symbol
+                        for symbol in symbols_to_modify
+                        if symbol.lower() in self._chunk_instrument_names
+                    ]
+
+                    if not filtered_symbols:
+                        log.debug(
+                            f"No relevant symbols for chunk '{self.market_def.market_id}' in command"
                         )
-                        if not message:
-                            continue
+                        continue
 
-                        log.info(f"Received command on control channel: {message['data']}")
-                        command = orjson.loads(message["data"])
-                        action = command.get("action")
-                        symbols_to_modify = command.get("symbols", [])
+                    # NOTE: Binance uses @aggTrade for aggregated trades. Using @trade for raw.
+                    streams_to_modify = [
+                        f"{symbol.lower().split('@')[0]}@trade"
+                        for symbol in filtered_symbols
+                    ]
 
-                        if not symbols_to_modify:
-                            continue
-
-                        # FILTER: Only process symbols in this chunk's instrument list
-                        filtered_symbols = [
-                            symbol for symbol in symbols_to_modify
-                            if symbol.lower() in self._chunk_instrument_names
+                    if action == "subscribe":
+                        new_subs = [
+                            s
+                            for s in streams_to_modify
+                            if s not in self._subscriptions
                         ]
-                        
-                        if not filtered_symbols:
-                            log.debug(f"No relevant symbols for chunk '{self.market_def.market_id}' in command")
-                            continue
+                        if new_subs:
+                            await self._send_subscription_request(
+                                "SUBSCRIBE", new_subs
+                            )
+                            self._subscriptions.update(new_subs)
 
-                        # NOTE: Binance uses @aggTrade for aggregated trades. Using @trade for raw.
-                        streams_to_modify = [
-                            f"{symbol.lower().split('@')[0]}@trade"
-                            for symbol in filtered_symbols
+                    elif action == "unsubscribe":
+                        old_subs = [
+                            s for s in streams_to_modify if s in self._subscriptions
                         ]
+                        if old_subs:
+                            await self._send_subscription_request(
+                                "UNSUBSCRIBE", old_subs
+                            )
+                            self._subscriptions.difference_update(old_subs)
 
-                        if action == "subscribe":
-                            new_subs = [
-                                s for s in streams_to_modify if s not in self._subscriptions
-                            ]
-                            if new_subs:
-                                await self._send_subscription_request("SUBSCRIBE", new_subs)
-                                self._subscriptions.update(new_subs)
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    log.error(
+                        f"Error in control channel listener: {e}", exc_info=True
+                    )
+                    await asyncio.sleep(5)
 
-                        elif action == "unsubscribe":
-                            old_subs = [
-                                s for s in streams_to_modify if s in self._subscriptions
-                            ]
-                            if old_subs:
-                                await self._send_subscription_request(
-                                    "UNSUBSCRIBE", old_subs
-                                )
-                                self._subscriptions.difference_update(old_subs)
-
-                    except asyncio.CancelledError:
-                        break
-                    except Exception as e:
-                        log.error(f"Error in control channel listener: {e}", exc_info=True)
-                        await asyncio.sleep(5)
-                        
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
         """
         Main message generator loop. Connects to the WebSocket and yields messages.
@@ -184,12 +197,14 @@ class BinanceWsClient(AbstractWsClient):
 
                         yield StreamMessage(
                             exchange=self.exchange_name,
-                            channel=f"trade.{symbol}.{market_type_str}", # Use 'trade' for consistency
+                            channel=f"trade.{symbol}.{market_type_str}",  # Use 'trade' for consistency
                             timestamp=trade_data.get("T"),
                             data={
                                 "symbol": symbol,
                                 "market_type": market_type_str,
-                                "trade_id": trade_data.get("t"), # 't' is trade ID for individual trades
+                                "trade_id": trade_data.get(
+                                    "t"
+                                ),  # 't' is trade ID for individual trades
                                 "price": float(trade_data.get("p")),
                                 "quantity": float(trade_data.get("q")),
                                 "is_buyer_maker": trade_data.get("m"),

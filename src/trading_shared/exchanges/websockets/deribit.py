@@ -84,9 +84,13 @@ class DeribitWsClient(AbstractWsClient):
 
         if self.subscription_scope == "public":
             if not self.instruments_to_subscribe:
-                log.warning(f"[{self.exchange_name}] No instruments provided for public subscription.")
+                log.warning(
+                    f"[{self.exchange_name}] No instruments provided for public subscription."
+                )
                 return
-            log.info(f"[{self.exchange_name}] Building public subscriptions for {len(self.instruments_to_subscribe)} instruments.")
+            log.info(
+                f"[{self.exchange_name}] Building public subscriptions for {len(self.instruments_to_subscribe)} instruments."
+            )
             for instrument in self.instruments_to_subscribe:
                 # Assuming 'instrument_name' is the key from the database record
                 channels.append(f"trades.{instrument['instrument_name']}.raw")
@@ -96,7 +100,9 @@ class DeribitWsClient(AbstractWsClient):
             channels = ["user.orders.any.any.raw", "user.trades.any.any.raw"]
 
         if not channels:
-            log.warning(f"[{self.exchange_name}] No channels to subscribe to for scope '{self.subscription_scope}'.")
+            log.warning(
+                f"[{self.exchange_name}] No channels to subscribe to for scope '{self.subscription_scope}'."
+            )
             return
 
         chunk_size = 100
@@ -108,7 +114,9 @@ class DeribitWsClient(AbstractWsClient):
                 "method": method,
                 "params": {"channels": chunk},
             }
-            log.info(f"[{self.exchange_name}][{self.subscription_scope}] Sending subscription request for {len(chunk)} channels.")
+            log.info(
+                f"[{self.exchange_name}][{self.subscription_scope}] Sending subscription request for {len(chunk)} channels."
+            )
             await self._send_json(msg)
 
     def _handle_control_message(self, data: dict) -> bool:
@@ -143,16 +151,18 @@ class DeribitWsClient(AbstractWsClient):
 
         async with websockets.connect(self.ws_connection_url, ping_interval=30) as ws:
             self.websocket_client = ws
-            log.info(f"[{self.exchange_name}][{self.subscription_scope}] WebSocket connection established.")
-            
+            log.info(
+                f"[{self.exchange_name}][{self.subscription_scope}] WebSocket connection established."
+            )
+
             is_authenticated = self.subscription_scope != "private"
             has_subscribed = False
 
             if not is_authenticated:
                 await self._send_json(auth_msg)
-            
+
             # For public scope, subscribe immediately after connecting
-            if self.subscription_scope == 'public':
+            if self.subscription_scope == "public":
                 await self._subscribe()
                 has_subscribed = True
 
@@ -165,9 +175,13 @@ class DeribitWsClient(AbstractWsClient):
                     if not is_authenticated:
                         if data.get("id") == AUTH_ID:
                             if "error" in data:
-                                log.error(f"[{self.exchange_name}] Authentication failed: {data['error']}")
+                                log.error(
+                                    f"[{self.exchange_name}] Authentication failed: {data['error']}"
+                                )
                                 return
-                            log.success(f"[{self.exchange_name}] Authentication successful.")
+                            log.success(
+                                f"[{self.exchange_name}] Authentication successful."
+                            )
                             is_authenticated = True
                             await self._subscribe()
                             has_subscribed = True
@@ -177,7 +191,11 @@ class DeribitWsClient(AbstractWsClient):
                         continue
 
                     params = data.get("params")
-                    if isinstance(params, dict) and "channel" in params and "data" in params:
+                    if (
+                        isinstance(params, dict)
+                        and "channel" in params
+                        and "data" in params
+                    ):
                         yield StreamMessage(
                             exchange=self.exchange_name,
                             channel=params["channel"],
@@ -192,7 +210,9 @@ class DeribitWsClient(AbstractWsClient):
     async def process_messages(self):
         self._is_running.set()
         reconnect_attempts = 0
-        log.info(f"[{self.exchange_name}][{self.subscription_scope}] Starting message processor.")
+        log.info(
+            f"[{self.exchange_name}][{self.subscription_scope}] Starting message processor."
+        )
 
         while self._is_running.is_set():
             try:
@@ -214,15 +234,25 @@ class DeribitWsClient(AbstractWsClient):
                                 is_flushed = True
                                 batch.clear()
                             except ConnectionError:
-                                log.error(f"[{self.exchange_name}] Failed to flush batch to Redis. Retrying in 5s...")
+                                log.error(
+                                    f"[{self.exchange_name}] Failed to flush batch to Redis. Retrying in 5s..."
+                                )
                                 await asyncio.sleep(5)
 
             except asyncio.CancelledError:
                 break
-            except (websockets.exceptions.ConnectionClosed, ConnectionRefusedError, asyncio.TimeoutError) as e:
-                log.warning(f"[{self.exchange_name}] WebSocket connection error: {type(e).__name__}. Will reconnect.")
+            except (
+                websockets.exceptions.ConnectionClosed,
+                ConnectionRefusedError,
+                asyncio.TimeoutError,
+            ) as e:
+                log.warning(
+                    f"[{self.exchange_name}] WebSocket connection error: {type(e).__name__}. Will reconnect."
+                )
             except Exception:
-                log.exception(f"[{self.exchange_name}] Unhandled error in processor for scope '{self.subscription_scope}'")
+                log.exception(
+                    f"[{self.exchange_name}] Unhandled error in processor for scope '{self.subscription_scope}'"
+                )
             finally:
                 if self.websocket_client:
                     await self.websocket_client.close()
@@ -234,7 +264,9 @@ class DeribitWsClient(AbstractWsClient):
                     log.info(f"[{self.exchange_name}] Reconnecting in {delay:.1f}s...")
                     await asyncio.sleep(delay)
 
-        log.info(f"[{self.exchange_name}][{self.subscription_scope}] Message processor shut down.")
+        log.info(
+            f"[{self.exchange_name}][{self.subscription_scope}] Message processor shut down."
+        )
 
     async def close(self):
         log.info(f"[{self.exchange_name}][{self.subscription_scope}] Closing client...")

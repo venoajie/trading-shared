@@ -129,13 +129,13 @@ class CustomRedisClient:
                 except Exception as e:
                     log.warning(f"Error closing pubsub connection: {e}")
             self._pubsub_connections.clear()
-            
+
             # Recreate empty pool
             self._pubsub_pool = asyncio.Queue(maxsize=self._pubsub_max_connections)
-            
+
             await self._safe_close_pool()
             log.info("Redis connection pool and pubsub connections closed.")
-        
+
     async def execute_resiliently(
         self,
         func: Callable[[aioredis.Redis], Awaitable[T]],
@@ -177,7 +177,7 @@ class CustomRedisClient:
     async def pubsub(self) -> PubSub:
         """
         Provides a managed PubSub object that guarantees connection cleanup.
-        """                
+        """
         # Try to get from pool first
         try:
             pubsub_conn = self._pubsub_pool.get_nowait()
@@ -197,7 +197,7 @@ class CustomRedisClient:
                             log.debug("Recycled idle PubSub connection")
                         except:
                             pass
-                
+
                 # Double-check after recycling
                 try:
                     pubsub_conn = self._pubsub_pool.get_nowait()
@@ -207,23 +207,24 @@ class CustomRedisClient:
                         pubsub_conn = pool.pubsub()
                         self._pubsub_connections.append(pubsub_conn)
                         self._pubsub_last_used[id(pubsub_conn)] = current_time
-                        log.debug(f"Created new PubSub connection (total: {len(self._pubsub_connections)})")
+                        log.debug(
+                            f"Created new PubSub connection (total: {len(self._pubsub_connections)})"
+                        )
                     else:
                         # Wait with timeout to prevent deadlock
                         try:
                             pubsub_conn = await asyncio.wait_for(
-                                self._pubsub_pool.get(), 
-                                timeout=5.0
+                                self._pubsub_pool.get(), timeout=5.0
                             )
                         except asyncio.TimeoutError:
                             raise ConnectionError("No PubSub connections available")
-        
+
         try:
             yield pubsub_conn
         finally:
             # Update last used time
             self._pubsub_last_used[id(pubsub_conn)] = time.time()
-            
+
             # Return to pool for reuse
             try:
                 self._pubsub_pool.put_nowait(pubsub_conn)
@@ -234,7 +235,7 @@ class CustomRedisClient:
                 if pubsub_conn in self._pubsub_connections:
                     self._pubsub_connections.remove(pubsub_conn)
                 self._pubsub_last_used.pop(id(pubsub_conn), None)
-                    
+
     @staticmethod
     def parse_stream_message(message_data: dict[bytes, bytes]) -> dict:
         result = {}
