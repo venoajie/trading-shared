@@ -37,6 +37,7 @@ class BinanceWsClient(AbstractWsClient):
         instruments_to_subscribe: List[Dict[str, Any]],
         # Suffix to identify connection chunks in logs
         market_id_suffix: str = "",
+        control_channel: str | None = None,
     ):
         super().__init__(
             market_definition, market_data_repo, instrument_repo, redis_client
@@ -54,7 +55,13 @@ class BinanceWsClient(AbstractWsClient):
         
         self._ws: websockets.WebSocketClientProtocol | None = None
         self._is_running = asyncio.Event()
-        self._control_channel = f"control:{self.market_def.market_id}:subscriptions"
+        
+        # Set control channel (shared or per-chunk)
+        if control_channel:
+            self._control_channel = control_channel
+        else:
+            self._control_channel = f"control:{self.market_def.market_id}:subscriptions"           
+        
         self.settings = settings
         self.redis_client = redis_client
         self._redis_semaphore = asyncio.Semaphore(5)  # Limit concurrent Redis ops
@@ -79,10 +86,12 @@ class BinanceWsClient(AbstractWsClient):
         """Listens on a Redis channel for subscription management commands."""
         log.info(
             f"Listening for subscription commands on Redis channel: '{self._control_channel}'"
-        )
+        )   
         
-        # Use semaphore to limit concurrent connections
-        async with self._redis_semaphore:            
+        # Use connection pooling with limit
+        redis_semaphore = asyncio.Semaphore(3)  # Limit concurrent Redis ops per chunk
+        
+        async with redis_semaphore:
             async with self.redis_client.pubsub() as pubsub:
                 await pubsub.subscribe(self._control_channel)
                 while self._is_running.is_set():
@@ -101,10 +110,20 @@ class BinanceWsClient(AbstractWsClient):
                         if not symbols_to_modify:
                             continue
 
+                        # FILTER: Only process symbols in this chunk's instrument list
+                        filtered_symbols = [
+                            symbol for symbol in symbols_to_modify
+                            if symbol.lower() in self._chunk_instrument_names
+                        ]
+                        
+                        if not filtered_symbols:
+                            log.debug(f"No relevant symbols for chunk '{self.market_def.market_id}' in command")
+                            continue
+
                         # NOTE: Binance uses @aggTrade for aggregated trades. Using @trade for raw.
                         streams_to_modify = [
                             f"{symbol.lower().split('@')[0]}@trade"
-                            for symbol in symbols_to_modify
+                            for symbol in filtered_symbols
                         ]
 
                         if action == "subscribe":
@@ -130,7 +149,7 @@ class BinanceWsClient(AbstractWsClient):
                     except Exception as e:
                         log.error(f"Error in control channel listener: {e}", exc_info=True)
                         await asyncio.sleep(5)
-
+                        
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
         """
         Main message generator loop. Connects to the WebSocket and yields messages.
