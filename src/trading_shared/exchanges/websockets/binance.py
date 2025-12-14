@@ -35,19 +35,18 @@ class BinanceWsClient(AbstractWsClient):
         market_data_repo: MarketDataRepository,
         settings: ExchangeSettings,
         instruments_to_subscribe: List[Dict[str, Any]],
-        # NEW: Suffix to identify connection chunks in logs
+        # Suffix to identify connection chunks in logs
         market_id_suffix: str = "",
     ):
         super().__init__(
             market_definition, market_data_repo, instrument_repo, redis_client
         )
-        # NEW: Adjust market_id for logging
+        # Adjust market_id for logging
         if market_id_suffix:
             self.market_def.market_id = f"{self.market_def.market_id}_{market_id_suffix}"
 
         self.ws_connection_url = self.market_def.ws_base_url
         self.instruments_to_subscribe = instruments_to_subscribe
-        
         self._subscriptions: Set[str] = {
             f"{inst['instrument_name'].lower()}@trade"
             for inst in self.instruments_to_subscribe
@@ -58,6 +57,7 @@ class BinanceWsClient(AbstractWsClient):
         self._control_channel = f"control:{self.market_def.market_id}:subscriptions"
         self.settings = settings
         self.redis_client = redis_client
+        self._redis_semaphore = asyncio.Semaphore(5)  # Limit concurrent Redis ops
         if not self._control_channel:
             raise ValueError("Binance subscription control channel not configured.")
             
@@ -80,53 +80,56 @@ class BinanceWsClient(AbstractWsClient):
         log.info(
             f"Listening for subscription commands on Redis channel: '{self._control_channel}'"
         )
-        async with self.redis_client.pubsub() as pubsub:
-            await pubsub.subscribe(self._control_channel)
-            while self._is_running.is_set():
-                try:
-                    message = await pubsub.get_message(
-                        ignore_subscribe_messages=True, timeout=1.0
-                    )
-                    if not message:
-                        continue
+        
+        # Use semaphore to limit concurrent connections
+        async with self._redis_semaphore:            
+            async with self.redis_client.pubsub() as pubsub:
+                await pubsub.subscribe(self._control_channel)
+                while self._is_running.is_set():
+                    try:
+                        message = await pubsub.get_message(
+                            ignore_subscribe_messages=True, timeout=1.0
+                        )
+                        if not message:
+                            continue
 
-                    log.info(f"Received command on control channel: {message['data']}")
-                    command = orjson.loads(message["data"])
-                    action = command.get("action")
-                    symbols_to_modify = command.get("symbols", [])
+                        log.info(f"Received command on control channel: {message['data']}")
+                        command = orjson.loads(message["data"])
+                        action = command.get("action")
+                        symbols_to_modify = command.get("symbols", [])
 
-                    if not symbols_to_modify:
-                        continue
+                        if not symbols_to_modify:
+                            continue
 
-                    # NOTE: Binance uses @aggTrade for aggregated trades. Using @trade for raw.
-                    streams_to_modify = [
-                        f"{symbol.lower().split('@')[0]}@trade"
-                        for symbol in symbols_to_modify
-                    ]
-
-                    if action == "subscribe":
-                        new_subs = [
-                            s for s in streams_to_modify if s not in self._subscriptions
+                        # NOTE: Binance uses @aggTrade for aggregated trades. Using @trade for raw.
+                        streams_to_modify = [
+                            f"{symbol.lower().split('@')[0]}@trade"
+                            for symbol in symbols_to_modify
                         ]
-                        if new_subs:
-                            await self._send_subscription_request("SUBSCRIBE", new_subs)
-                            self._subscriptions.update(new_subs)
 
-                    elif action == "unsubscribe":
-                        old_subs = [
-                            s for s in streams_to_modify if s in self._subscriptions
-                        ]
-                        if old_subs:
-                            await self._send_subscription_request(
-                                "UNSUBSCRIBE", old_subs
-                            )
-                            self._subscriptions.difference_update(old_subs)
+                        if action == "subscribe":
+                            new_subs = [
+                                s for s in streams_to_modify if s not in self._subscriptions
+                            ]
+                            if new_subs:
+                                await self._send_subscription_request("SUBSCRIBE", new_subs)
+                                self._subscriptions.update(new_subs)
 
-                except asyncio.CancelledError:
-                    break
-                except Exception as e:
-                    log.error(f"Error in control channel listener: {e}", exc_info=True)
-                    await asyncio.sleep(5)
+                        elif action == "unsubscribe":
+                            old_subs = [
+                                s for s in streams_to_modify if s in self._subscriptions
+                            ]
+                            if old_subs:
+                                await self._send_subscription_request(
+                                    "UNSUBSCRIBE", old_subs
+                                )
+                                self._subscriptions.difference_update(old_subs)
+
+                    except asyncio.CancelledError:
+                        break
+                    except Exception as e:
+                        log.error(f"Error in control channel listener: {e}", exc_info=True)
+                        await asyncio.sleep(5)
 
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
         """

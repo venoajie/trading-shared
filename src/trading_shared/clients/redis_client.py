@@ -33,11 +33,12 @@ class CustomRedisClient:
         self._reconnect_attempts = 0
         self._write_sem = asyncio.Semaphore(self._settings.write_concurrency_limit)
         self._lock = asyncio.Lock()
-        self._pubsub_max_connections = 10  # Adjust based on needs
+        self._pubsub_max_connections = 30  # Adjust based on needs
         self._pubsub_pool = asyncio.Queue(maxsize=self._pubsub_max_connections)
         self._pubsub_connections = []  # For cleanup on close
         self._pubsub_lock = asyncio.Lock()
-        
+        self._pubsub_last_used = {}  # Track last use time for recycling
+
     async def connect(self):
         """
         Ensures the connection pool is initialized. This is the standard
@@ -176,8 +177,7 @@ class CustomRedisClient:
     async def pubsub(self) -> PubSub:
         """
         Provides a managed PubSub object that guarantees connection cleanup.
-        """
-            
+        """                
         # Try to get from pool first
         try:
             pubsub_conn = self._pubsub_pool.get_nowait()
@@ -185,7 +185,20 @@ class CustomRedisClient:
         except asyncio.QueueEmpty:
             # Create new connection if pool is empty
             async with self._pubsub_lock:
-                # Double-check after acquiring lock
+                # Check if we can recycle old connections first
+                current_time = time.time()
+                for conn in list(self._pubsub_connections):
+                    last_used = self._pubsub_last_used.get(id(conn), 0)
+                    if current_time - last_used > 300:  # 5 minutes idle
+                        try:
+                            await conn.close()
+                            self._pubsub_connections.remove(conn)
+                            self._pubsub_last_used.pop(id(conn), None)
+                            log.debug("Recycled idle PubSub connection")
+                        except:
+                            pass
+                
+                # Double-check after recycling
                 try:
                     pubsub_conn = self._pubsub_pool.get_nowait()
                 except asyncio.QueueEmpty:
@@ -193,24 +206,35 @@ class CustomRedisClient:
                         pool = await self._get_pool()
                         pubsub_conn = pool.pubsub()
                         self._pubsub_connections.append(pubsub_conn)
+                        self._pubsub_last_used[id(pubsub_conn)] = current_time
                         log.debug(f"Created new PubSub connection (total: {len(self._pubsub_connections)})")
                     else:
-                        # Wait for connection to become available
-                        log.debug("Waiting for available PubSub connection...")
-                        pubsub_conn = await self._pubsub_pool.get()
+                        # Wait with timeout to prevent deadlock
+                        try:
+                            pubsub_conn = await asyncio.wait_for(
+                                self._pubsub_pool.get(), 
+                                timeout=5.0
+                            )
+                        except asyncio.TimeoutError:
+                            raise ConnectionError("No PubSub connections available")
         
         try:
             yield pubsub_conn
         finally:
-            # Return to pool for reuse - DO NOT CLOSE
+            # Update last used time
+            self._pubsub_last_used[id(pubsub_conn)] = time.time()
+            
+            # Return to pool for reuse
             try:
                 self._pubsub_pool.put_nowait(pubsub_conn)
             except asyncio.QueueFull:
                 # This shouldn't happen with proper maxsize
                 log.warning("PubSub pool full, closing connection")
                 await pubsub_conn.close()
-                self._pubsub_connections.remove(pubsub_conn)
-                
+                if pubsub_conn in self._pubsub_connections:
+                    self._pubsub_connections.remove(pubsub_conn)
+                self._pubsub_last_used.pop(id(pubsub_conn), None)
+                    
     @staticmethod
     def parse_stream_message(message_data: dict[bytes, bytes]) -> dict:
         result = {}
