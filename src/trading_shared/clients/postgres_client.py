@@ -82,7 +82,7 @@ class PostgresClient:
                     min_size=self.postgres_settings.pool_min_size,
                     max_size=self.postgres_settings.pool_max_size,
                     command_timeout=self.postgres_settings.command_timeout,
-                    init=self._setup_json_codec,
+                    init=self._setup_codecs,
                 )
                 log.info("PostgreSQL pool created successfully.")
                 return self._pool
@@ -90,6 +90,34 @@ class PostgresClient:
                 self._pool = None
                 raise ConnectionError("Fatal: Could not create PostgreSQL pool.") from e
 
+    async def _setup_codecs(self, connection: asyncpg.Connection):
+        # 1. JSON Codec
+        for json_type in ["jsonb", "json"]:
+            await connection.set_type_codec(
+                json_type,
+                encoder=lambda d: orjson.dumps(d).decode("utf-8"),
+                decoder=orjson.loads,
+                schema="pg_catalog",
+            )
+            
+        # 2. Custom Composite Types.
+        # We must register the type so asyncpg can map the Python tuple to the DB type
+        try:
+            await connection.set_type_codec(
+                'public_trade_insert_type',
+                schema='public',
+                format='tuple' # Tells asyncpg to treat Python tuples as this composite type
+            )
+            # Also register for OHLC upserts if needed
+            await connection.set_type_codec(
+                'ohlc_upsert_type',
+                schema='public',
+                format='tuple'
+            )
+        except Exception:
+            # Type might not exist in some environments (e.g. during migrations), ignore safely
+            pass
+            
     async def close(self):
         async with self._lock:
             if self._pool:
