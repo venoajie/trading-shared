@@ -104,9 +104,7 @@ class BinanceWsClient(AbstractWsClient):
                     if not message:
                         continue
 
-                    log.info(
-                        f"Received command on control channel: {message['data']}"
-                    )
+                    log.info(f"Received command on control channel: {message['data']}")
                     command = orjson.loads(message["data"])
                     action = command.get("action")
                     symbols_to_modify = command.get("symbols", [])
@@ -135,14 +133,10 @@ class BinanceWsClient(AbstractWsClient):
 
                     if action == "subscribe":
                         new_subs = [
-                            s
-                            for s in streams_to_modify
-                            if s not in self._subscriptions
+                            s for s in streams_to_modify if s not in self._subscriptions
                         ]
                         if new_subs:
-                            await self._send_subscription_request(
-                                "SUBSCRIBE", new_subs
-                            )
+                            await self._send_subscription_request("SUBSCRIBE", new_subs)
                             self._subscriptions.update(new_subs)
 
                     elif action == "unsubscribe":
@@ -158,9 +152,7 @@ class BinanceWsClient(AbstractWsClient):
                 except asyncio.CancelledError:
                     break
                 except Exception as e:
-                    log.error(
-                        f"Error in control channel listener: {e}", exc_info=True
-                    )
+                    log.error(f"Error in control channel listener: {e}", exc_info=True)
                     await asyncio.sleep(5)
 
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:

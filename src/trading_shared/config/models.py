@@ -20,11 +20,12 @@ class RedisSettings(BaseModel):
         description="Timeout in seconds for establishing a new Redis connection.",
     )
     max_connections: int = Field(
-        default=30, description="Maximum number of connections in the standard command pool."
+        default=30,
+        description="Maximum number of connections in the standard command pool.",
     )
     pubsub_max_connections: int = Field(
-        default=50, 
-        description="Maximum number of connections in the PubSub pool. Must exceed Total_Instruments / 200."
+        default=50,
+        description="Maximum number of connections in the PubSub pool. Must exceed Total_Instruments / 200.",
     )
     max_retries: int = Field(
         default=3, description="Maximum number of retries for a resilient command."
@@ -32,6 +33,7 @@ class RedisSettings(BaseModel):
     initial_retry_delay_s: float = Field(
         default=0.5, description="Initial delay in seconds for exponential backoff."
     )
+
 
 class PostgresSettings(BaseModel):
     user: str

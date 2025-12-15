@@ -100,7 +100,7 @@ class CustomRedisClient:
                     encoding="utf-8",
                     decode_responses=False,
                 )
-                
+
                 # Rationale of 10s: Prevents false positives during high-CPU startup sequences.
                 await asyncio.wait_for(self._pool.ping(), timeout=10)
                 self._reconnect_attempts = 0
