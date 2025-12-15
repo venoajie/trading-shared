@@ -32,7 +32,7 @@ class TradeRepository:
 
         # Convert Dicts to Tuples in the EXACT order of the Postgres Type.
         # Type: public_trade_insert_type
-        # (exchange, instrument_name, market_type, trade_id, price, quantity, 
+        # (exchange, instrument_name, market_type, trade_id, price, quantity,
         #  is_buyer_maker, was_best_price_match, trade_timestamp)
         trade_tuples = [
             (
@@ -52,7 +52,7 @@ class TradeRepository:
         query = """
             SELECT bulk_insert_public_trades($1::public_trade_insert_type[])
         """
-        
-        # We pass the list of tuples as a single argument. 
+
+        # We pass the list of tuples as a single argument.
         # The PostgresClient's registered codec handles the array serialization.
         await self._db.execute(query, trade_tuples)
