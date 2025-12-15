@@ -87,6 +87,8 @@ class MarketDataRepository:
             "low": str(candle_data["low"]),
             "close": str(candle_data["close"]),
             "volume": str(candle_data["volume"]),
+            "buy_volume": str(candle_data.get("buy_volume", 0)),
+            "sell_volume": str(candle_data.get("sell_volume", 0)),
             "updated_at": str(candle_data.get("updated_at", "")),
         }
 
