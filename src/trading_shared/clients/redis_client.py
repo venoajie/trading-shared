@@ -33,7 +33,7 @@ class CustomRedisClient:
         self._reconnect_attempts = 0
         self._write_sem = asyncio.Semaphore(self._settings.write_concurrency_limit)
         self._lock = asyncio.Lock()
-        self._pubsub_max_connections = 30  # Adjust based on needs
+        self._pubsub_max_connections = 100  # Adjust based on needs
         self._pubsub_pool = asyncio.Queue(maxsize=self._pubsub_max_connections)
         self._pubsub_connections = []  # For cleanup on close
         self._pubsub_lock = asyncio.Lock()
