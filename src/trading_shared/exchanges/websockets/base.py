@@ -9,6 +9,7 @@ from ...clients.redis_client import CustomRedisClient
 from ...repositories.instrument_repository import InstrumentRepository
 from ...repositories.market_data_repository import MarketDataRepository
 
+
 class AbstractWsClient(ABC):
     """An abstract base class for exchange WebSocket clients."""
 
@@ -24,11 +25,11 @@ class AbstractWsClient(ABC):
         self.market_data_repo = market_data_repo
         self.instrument_repo = instrument_repo
         self.redis_client = redis_client
-        
+
         # Unified stream name. All exchanges will write to this single key.
         # This aligns with the Distributor's configuration.
         self.stream_name = "stream:market_data"
-        
+
     @abstractmethod
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
         """Connects, authenticates, subscribes, and yields canonical StreamMessage objects."""

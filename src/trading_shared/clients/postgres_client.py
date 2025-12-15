@@ -99,25 +99,23 @@ class PostgresClient:
                 decoder=orjson.loads,
                 schema="pg_catalog",
             )
-            
+
         # 2. Custom Composite Types.
         # We must register the type so asyncpg can map the Python tuple to the DB type
         try:
             await connection.set_type_codec(
-                'public_trade_insert_type',
-                schema='public',
-                format='tuple' # Tells asyncpg to treat Python tuples as this composite type
+                "public_trade_insert_type",
+                schema="public",
+                format="tuple",  # Tells asyncpg to treat Python tuples as this composite type
             )
             # Also register for OHLC upserts if needed
             await connection.set_type_codec(
-                'ohlc_upsert_type',
-                schema='public',
-                format='tuple'
+                "ohlc_upsert_type", schema="public", format="tuple"
             )
         except Exception:
             # Type might not exist in some environments (e.g. during migrations), ignore safely
             pass
-            
+
     async def close(self):
         async with self._lock:
             if self._pool:
