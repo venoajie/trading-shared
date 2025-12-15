@@ -55,7 +55,6 @@ class BinanceWsClient(AbstractWsClient):
             for inst in self.instruments_to_subscribe
         }
 
-        # NEW: Set of instrument names for this chunk
         self._chunk_instrument_names = {
             inst["instrument_name"].lower() for inst in self.instruments_to_subscribe
         }
@@ -94,66 +93,91 @@ class BinanceWsClient(AbstractWsClient):
         log.info(
             f"Listening for subscription commands on Redis channel: '{self._control_channel}'"
         )
-        async with self.redis_client.pubsub() as pubsub:
-            await pubsub.subscribe(self._control_channel)
-            while self._is_running.is_set():
-                try:
-                    message = await pubsub.get_message(
-                        ignore_subscribe_messages=True, timeout=1.0
-                    )
-                    if not message:
-                        continue
 
-                    log.info(f"Received command on control channel: {message['data']}")
-                    command = orjson.loads(message["data"])
-                    action = command.get("action")
-                    symbols_to_modify = command.get("symbols", [])
+        # OUTER LOOP: Handles Reconnection
+        while self._is_running.is_set():
+            try:
+                # Acquire a FRESH connection each time we enter this block
+                async with self.redis_client.pubsub() as pubsub:
+                    await pubsub.subscribe(self._control_channel)
+                    log.debug(f"Subscribed to control channel: {self._control_channel}")
 
-                    if not symbols_to_modify:
-                        continue
-
-                    # FILTER: Only process symbols in this chunk's instrument list
-                    filtered_symbols = [
-                        symbol
-                        for symbol in symbols_to_modify
-                        if symbol.lower() in self._chunk_instrument_names
-                    ]
-
-                    if not filtered_symbols:
-                        log.debug(
-                            f"No relevant symbols for chunk '{self.market_def.market_id}' in command"
-                        )
-                        continue
-
-                    # NOTE: Binance uses @aggTrade for aggregated trades. Using @trade for raw.
-                    streams_to_modify = [
-                        f"{symbol.lower().split('@')[0]}@trade"
-                        for symbol in filtered_symbols
-                    ]
-
-                    if action == "subscribe":
-                        new_subs = [
-                            s for s in streams_to_modify if s not in self._subscriptions
-                        ]
-                        if new_subs:
-                            await self._send_subscription_request("SUBSCRIBE", new_subs)
-                            self._subscriptions.update(new_subs)
-
-                    elif action == "unsubscribe":
-                        old_subs = [
-                            s for s in streams_to_modify if s in self._subscriptions
-                        ]
-                        if old_subs:
-                            await self._send_subscription_request(
-                                "UNSUBSCRIBE", old_subs
+                    # INNER LOOP: Processes Messages
+                    while self._is_running.is_set():
+                        try:
+                            message = await pubsub.get_message(
+                                ignore_subscribe_messages=True, timeout=1.0
                             )
-                            self._subscriptions.difference_update(old_subs)
+                            if not message:
+                                continue
 
-                except asyncio.CancelledError:
-                    break
-                except Exception as e:
-                    log.error(f"Error in control channel listener: {e}", exc_info=True)
-                    await asyncio.sleep(5)
+                            log.info(
+                                f"Received command on control channel: {message['data']}"
+                            )
+                            command = orjson.loads(message["data"])
+                            action = command.get("action")
+                            symbols_to_modify = command.get("symbols", [])
+
+                            if not symbols_to_modify:
+                                continue
+
+                            # FILTER: Only process symbols in this chunk's instrument list
+                            filtered_symbols = [
+                                symbol
+                                for symbol in symbols_to_modify
+                                if symbol.lower() in self._chunk_instrument_names
+                            ]
+
+                            if not filtered_symbols:
+                                continue
+
+                            streams_to_modify = [
+                                f"{symbol.lower().split('@')[0]}@trade"
+                                for symbol in filtered_symbols
+                            ]
+
+                            if action == "subscribe":
+                                new_subs = [
+                                    s
+                                    for s in streams_to_modify
+                                    if s not in self._subscriptions
+                                ]
+                                if new_subs:
+                                    await self._send_subscription_request(
+                                        "SUBSCRIBE", new_subs
+                                    )
+                                    self._subscriptions.update(new_subs)
+
+                            elif action == "unsubscribe":
+                                old_subs = [
+                                    s
+                                    for s in streams_to_modify
+                                    if s in self._subscriptions
+                                ]
+                                if old_subs:
+                                    await self._send_subscription_request(
+                                        "UNSUBSCRIBE", old_subs
+                                    )
+                                    self._subscriptions.difference_update(old_subs)
+
+                        except (orjson.JSONDecodeError, KeyError) as e:
+                            log.warning(f"Invalid command received: {e}")
+                            continue
+
+                        # CRITICAL: Catch connection errors inside the inner loop to break to the outer loop
+                        except (ConnectionError, OSError) as e:
+                            log.warning(
+                                f"Control channel connection lost: {e}. Reconnecting..."
+                            )
+                            break  # Breaks inner loop -> Context Manager closes -> Outer loop reconnects
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                log.error(
+                    f"Unexpected error in control channel listener: {e}", exc_info=True
+                )
+                await asyncio.sleep(5)  # Backoff before reconnecting
 
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
         """
