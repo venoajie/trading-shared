@@ -1,7 +1,7 @@
 # src/trading_shared/repositories/market_data_repository.py
 
 # --- Built Ins ---
-from typing import List, Dict, Deque, Any
+from typing import List, Dict, Deque, Any, Optional
 from collections import deque
 
 # --- Installed ---
@@ -96,3 +96,44 @@ class MarketDataRepository:
 
         # Set a TTL (e.g., 5 minutes) so stale data doesn't linger forever if the stream dies
         await self._redis.expire(key, 300)
+
+    async def get_realtime_candle(
+        self,
+        instrument_name: str,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Retrieves the current in-flight candle from Redis.
+        """
+        key = f"cache:ohlc:live:{instrument_name}"
+        data = await self._redis.hgetall(key)
+
+        if not data:
+            return None
+
+        # Convert byte strings back to appropriate types
+        try:
+            return {
+                "tick": int(data[b"tick"]),
+                "open": float(data[b"open"]),
+                "high": float(data[b"high"]),
+                "low": float(data[b"low"]),
+                "close": float(data[b"close"]),
+                "volume": float(data[b"volume"]),
+                "updated_at": data[b"updated_at"].decode("utf-8"),
+            }
+        except (KeyError, ValueError) as e:
+            log.warning(f"Corrupt realtime candle in Redis for {instrument_name}: {e}")
+            return None
+
+    async def set_market_regime(
+        self,
+        instrument_name: str,
+        regime: str,
+    ):
+        """
+        Publishes the calculated regime to Redis for the Executor to consume.
+        """
+        # Key format: system:regime:deribit:<instrument>
+        # We assume exchange is deribit for now, or pass it in.
+        key = f"system:regime:deribit:{instrument_name}"
+        await self._redis.set(key, regime)
