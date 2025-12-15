@@ -40,10 +40,10 @@ class MarketDataRepository:
         )
 
     async def cache_ticker(
-        self, 
-        symbol: str, 
+        self,
+        symbol: str,
         data: Dict,
-        ):
+    ):
         """Caches the latest ticker data in a Redis hash."""
         redis_key = f"ticker:{symbol}"
         await self._redis.hset(redis_key, "payload", orjson.dumps(data))
@@ -66,19 +66,18 @@ class MarketDataRepository:
             )
             return None
 
-
     async def update_realtime_candle(
-        self, 
-        instrument_name: str, 
+        self,
+        instrument_name: str,
         candle_data: dict,
-        ):
+    ):
         """
         Updates the 'Live' in-flight candle in Redis.
         Used by the Distributor for real-time analytics visibility.
         """
         # Key format: cache:ohlc:live:<instrument_name>
         key = f"cache:ohlc:live:{instrument_name}"
-        
+
         # We use HSET with mapping to update fields atomically
         # We convert values to strings to ensure Redis compatibility
         mapping = {
@@ -88,12 +87,12 @@ class MarketDataRepository:
             "low": str(candle_data["low"]),
             "close": str(candle_data["close"]),
             "volume": str(candle_data["volume"]),
-            "updated_at": str(candle_data.get("updated_at", ""))
+            "updated_at": str(candle_data.get("updated_at", "")),
         }
-        
+
         # Fire and forget (don't wait for response to keep latency low)
         # Note: In a strict async loop, we still await, but it's fast.
         await self._redis.hset(name=key, mapping=mapping)
-        
+
         # Set a TTL (e.g., 5 minutes) so stale data doesn't linger forever if the stream dies
         await self._redis.expire(key, 300)

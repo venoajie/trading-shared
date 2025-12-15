@@ -6,6 +6,7 @@ from typing import List, Dict, Any
 # --- Local Application Imports ---
 from trading_shared.clients.postgres_client import PostgresClient
 
+
 class OptionsRepository:
     def __init__(self, db_client: PostgresClient):
         self._db = db_client
@@ -18,7 +19,7 @@ class OptionsRepository:
             return
 
         # Map Dicts to Tuples matching 'option_trade_insert_type' order:
-        # (exchange, instrument_name, tick, price, quantity, 
+        # (exchange, instrument_name, tick, price, quantity,
         #  iv, delta, gamma, vega, theta, rho, underlying_price)
         data_tuples = [
             (
@@ -41,5 +42,5 @@ class OptionsRepository:
         query = """
             SELECT bulk_insert_options_data($1::option_trade_insert_type[])
         """
-        
+
         await self._db.execute(query, data_tuples)
