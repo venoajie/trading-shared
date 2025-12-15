@@ -100,7 +100,9 @@ class CustomRedisClient:
                     encoding="utf-8",
                     decode_responses=False,
                 )
-                await asyncio.wait_for(self._pool.ping(), timeout=3)
+                
+                # Rationale of 10s: Prevents false positives during high-CPU startup sequences.
+                await asyncio.wait_for(self._pool.ping(), timeout=10)
                 self._reconnect_attempts = 0
                 log.info("Redis connection established")
                 return self._pool
