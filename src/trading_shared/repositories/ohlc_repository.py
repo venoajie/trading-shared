@@ -59,14 +59,21 @@ class OhlcRepository:
         )
 
     async def fetch_latest_timestamp(
-        self, exchange: str, instrument: str, res_td: timedelta
+        self,
+        exchange: str,
+        instrument: str,
+        res_td: timedelta,
     ) -> Optional[datetime]:
         query = "SELECT MAX(tick) AS latest_tick FROM ohlc WHERE exchange = $1 AND instrument_name = $2 AND resolution = $3"
         result = await self._db.fetchrow(query, exchange, instrument, res_td)
         return result["latest_tick"] if result and result["latest_tick"] else None
 
     async def fetch_for_instrument(
-        self, exchange: str, instrument: str, res_str: str, limit: int
+        self,
+        exchange: str,
+        instrument: str,
+        res_str: str,
+        limit: int,
     ) -> List[asyncpg.Record]:
         res_td = self._parse_resolution_to_timedelta(res_str)
         query = "SELECT * FROM ohlc WHERE exchange = $1 AND instrument_name = $2 AND resolution = $3 ORDER BY tick DESC LIMIT $4"
