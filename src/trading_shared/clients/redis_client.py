@@ -498,6 +498,14 @@ class CustomRedisClient:
 
         return await self.execute_resiliently(command, f"HGET {name}")
 
+    async def hgetall(self, name: str) -> dict[bytes, bytes]:
+        """Returns all fields and values of the hash stored at key."""
+
+        async def command(conn: aioredis.Redis):
+            return await conn.hgetall(name)
+
+        return await self.execute_resiliently(command, f"HGETALL {name}")
+
     async def hset(self, name: str, key: str, value: Any):
         async def command(conn: aioredis.Redis):
             await conn.hset(name, key, value)
