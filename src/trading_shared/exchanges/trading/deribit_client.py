@@ -14,6 +14,7 @@ from pydantic import SecretStr
 
 # --- Local Application Imports ---
 from ...config.models import ExchangeSettings
+from ...notifications.manager import NotificationManager
 from .deribit_constants import ApiMethods
 
 
@@ -31,11 +32,13 @@ class DeribitTradingClient:
         settings: ExchangeSettings,
         client_id: str,
         client_secret: Union[str, SecretStr],
+        notification_manager: Optional[NotificationManager] = None,
     ):
         # Store credentials without assumption of type.
         self._client_id = client_id
         self._client_secret = client_secret
         self._settings = settings
+        self.notification_manager = notification_manager
         self.exchange_name = "deribit"
         self._session: Optional[aiohttp.ClientSession] = None
         self._base_url = (
