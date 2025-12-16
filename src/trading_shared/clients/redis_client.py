@@ -153,11 +153,27 @@ class CustomRedisClient:
         for attempt in range(max_retries):
             try:
                 pool = await self._get_pool()
+                # Check if pool is None before using it
+                if pool is None:
+                    raise ConnectionError(
+                        "Redis pool is None - connection not established"
+                    )
                 return await func(pool)
+            except AttributeError as e:
+                # Catch AttributeError when pool methods fail
+                log.warning(
+                    f"Redis command '{command_name_for_logging}' failed due to AttributeError "
+                    f"(attempt {attempt + 1}/{max_retries}): {e}"
+                )
+                last_exception = e
+                await self._safe_close_pool()
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(initial_delay * (2**attempt))
             except (
                 redis_exceptions.ConnectionError,
                 redis_exceptions.TimeoutError,
                 TimeoutError,
+                ConnectionError,  # Catch our own ConnectionError
             ) as e:
                 log.warning(
                     f"Redis command '{command_name_for_logging}' failed "
@@ -554,3 +570,55 @@ class CustomRedisClient:
         return await self.execute_resiliently(
             lambda pool: pool.llen(key), f"LLEN {key}"
         )
+
+    async def ping(self) -> bool:
+        """
+        Pings the Redis server to test connectivity.
+        Returns True if successful, raises ConnectionError on failure.
+        """
+        try:
+            pool = await self._get_pool()
+            result = await pool.ping()
+            return result == b"PONG" or result == True
+        except Exception as e:
+            log.warning(f"Redis ping failed: {e}")
+            raise ConnectionError(f"Redis ping failed: {e}")
+
+    async def test_connection(self) -> bool:
+        """
+        Tests if the Redis connection is working.
+        Returns True if successful, False otherwise.
+        """
+        try:
+            await self.ping()
+            return True
+        except Exception:
+            return False
+
+    def is_connected(self) -> bool:
+        """Returns True if the client has an active connection pool."""
+        return self._pool is not None and not self._circuit_open
+
+    async def reconnect(self) -> bool:
+        """
+        Forces a reconnection to Redis.
+        Returns True if reconnection succeeded, False otherwise.
+        """
+        async with self._lock:
+            log.info("Attempting to force reconnect to Redis...")
+
+            # Close existing pool if any
+            await self._safe_close_pool()
+
+            # Reset circuit breaker
+            self._circuit_open = False
+            self._last_failure = 0
+
+            try:
+                # Try to get a new pool
+                await self._get_pool()
+                log.info("Redis reconnection successful")
+                return True
+            except ConnectionError as e:
+                log.error(f"Redis reconnection failed: {e}")
+                return False
