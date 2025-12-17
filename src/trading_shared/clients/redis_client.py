@@ -85,8 +85,10 @@ class CustomRedisClient:
                     else None
                 )
 
+                redis_url_str = str(self._settings.url)
+                
                 self._pool = aioredis.from_url(
-                    self._settings.url,
+                    redis_url_str, 
                     password=password_value,
                     db=int(self._settings.db or 0),
                     socket_connect_timeout=self._settings.socket_connect_timeout,
