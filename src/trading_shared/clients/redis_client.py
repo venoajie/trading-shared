@@ -1,3 +1,4 @@
+
 # src/trading_shared/clients/redis_client.py
 
 # --- Built Ins  ---
@@ -85,10 +86,14 @@ class CustomRedisClient:
                     else None
                 )
 
-                redis_url_str = str(self._settings.url)
-                
+                # ===============================================================
+                # THE FIX: Explicitly cast the Pydantic RedisDsn object to a string
+                # before passing it to the underlying redis-py library.
+                # ===============================================================
+                redis_url_as_string = str(self._settings.url)
+
                 self._pool = aioredis.from_url(
-                    redis_url_str, 
+                    redis_url_as_string, # <-- USE THE CASTED STRING
                     password=password_value,
                     db=int(self._settings.db or 0),
                     socket_connect_timeout=self._settings.socket_connect_timeout,
@@ -123,6 +128,7 @@ class CustomRedisClient:
                     "Redis connection failed on initial attempt."
                 ) from e
 
+    # ... (rest of redis_client.py remains unchanged)
     async def close(self):
         """Gracefully closes the active Redis connection pool and all pubsub connections."""
         async with self._lock:
