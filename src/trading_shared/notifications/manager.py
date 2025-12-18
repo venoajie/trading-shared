@@ -3,6 +3,7 @@
 # --- Built Ins  ---
 import asyncio
 from typing import Dict, Any, Optional, Union
+from datetime import datetime
 
 # --- Installed  ---
 import aiohttp
@@ -92,4 +93,61 @@ class NotificationManager:
             f"<b>🚨 SYSTEM ALERT 🚨</b>\n\n<b>Severity:</b> {alert.severity}\n<b>Component:</b> {alert.component}\n"
             f"<b>Event:</b> {alert.event}\n\n<b>Details:</b>\n<pre>{alert.details}</pre>"
         )
+        await self._send_telegram_message(text)
+
+    async def send_message(self, text: str):
+        """Send a generic HTML-formatted message to Telegram."""
+        await self._send_telegram_message(text)
+        
+        # Add to trading_shared/notifications/manager.py
+    async def send_signal_alert(self, signal_event):
+        """Send a strategy signal to Telegram."""
+        if not self.enabled:
+            return
+        
+        # Format the signal as HTML
+        meta = signal_event.metadata
+        
+        if signal_event.signal_type == "ENTRY_SHORT":
+            emoji = "🔻"
+            action = "SHORT"
+            color = "🔴"
+        else:
+            emoji = "🚀"
+            action = "LONG"
+            color = "🟢"
+        
+        # Check if this is a test signal
+        is_test = meta.get('test_signal', False)
+        
+        if is_test:
+            title = f"🧪 TEST SIGNAL - {action} {emoji}"
+        else:
+            title = f"{emoji} {action} SIGNAL {color}"
+        
+        # Format numbers nicely
+        volume_ratio = meta.get('volume_ratio', 0)
+        current_volume = meta.get('current_volume_usd', 0)
+        avg_volume = meta.get('avg_volume_usd', 0)
+        price_change = meta.get('price_change_1m', 0) * 100  # Convert to %
+        
+        text = (
+            f"{title}\n"
+            f"─────────────────────\n"
+            f"<b>Asset:</b> {meta.get('base_asset', 'N/A')}\n"
+            f"<b>Pair:</b> {signal_event.symbol}\n"
+            f"<b>Volume Spike:</b> {volume_ratio:.1f}x\n"
+            f"<b>Current Volume:</b> ${current_volume:,.0f}\n"
+            f"<b>Avg Volume:</b> ${avg_volume:,.0f}\n"
+            f"<b>1m Change:</b> {price_change:+.2f}%\n"
+            f"<b>Strategy:</b> {signal_event.strategy_name}\n"
+            f"<b>Strength:</b> {signal_event.strength:.1f}\n"
+        )
+        
+        if is_test:
+            text += f"<i>This is a TEST signal - not for trading</i>\n"
+        
+        text += f"─────────────────────\n"
+        text += f"<i>Timestamp: {datetime.utcnow().strftime('%H:%M:%S')} UTC</i>"
+        
         await self._send_telegram_message(text)
