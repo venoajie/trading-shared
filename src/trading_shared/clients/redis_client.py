@@ -520,13 +520,20 @@ class CustomRedisClient:
 
         await self.execute_resiliently(command, f"SET {key}")
 
-    async def hget(self, name: str, key: str) -> Optional[bytes]:
+    async def hget(
+        self, 
+        name: str, 
+        key: str,
+        ) -> Optional[bytes]:
         async def command(conn: aioredis.Redis):
             return await conn.hget(name, key)
 
         return await self.execute_resiliently(command, f"HGET {name}")
 
-    async def hgetall(self, name: str) -> dict[bytes, bytes]:
+    async def hgetall(
+        self, 
+        name: str,
+        ) -> dict[bytes, bytes]:
         """Returns all fields and values of the hash stored at key."""
 
         async def command(conn: aioredis.Redis):
@@ -558,6 +565,20 @@ class CustomRedisClient:
         else:
             raise ValueError("hset requires either a key/value pair or a mapping.")
 
+    async def expire(
+        self, 
+        name: str, 
+        time: int,
+        ):
+        """
+        Sets a timeout on a key.
+        """
+        async def command(conn: aioredis.Redis):
+            return await conn.expire(name, time)
+
+        await self.execute_resiliently(command, f"EXPIRE {name}")
+    
+    
     async def xadd(
         self,
         name: str,
