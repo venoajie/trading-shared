@@ -1,7 +1,6 @@
 # src/trading_shared/exchanges/public/deribit.py
 
 # --- Built Ins ---
-import asyncio
 from typing import List, Dict, Any
 from datetime import datetime, timezone
 

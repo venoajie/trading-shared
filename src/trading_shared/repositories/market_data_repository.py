@@ -2,7 +2,6 @@
 
 # --- Built Ins ---
 from typing import List, Dict, Deque, Any, Optional
-from collections import deque
 
 # --- Installed ---
 import orjson

@@ -16,7 +16,6 @@ import websockets
 from ...clients.redis_client import CustomRedisClient
 from ...clients.postgres_client import PostgresClient
 from ...config.models import ExchangeSettings
-from ...exchanges.trading.deribit_constants import WebsocketParameters
 from .base import AbstractWsClient
 
 # --- Shared Library Imports  ---

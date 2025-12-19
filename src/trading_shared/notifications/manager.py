@@ -2,7 +2,7 @@
 
 # --- Built Ins  ---
 import asyncio
-from typing import Dict, Any, Optional, Union
+from typing import Union
 from datetime import datetime
 
 # --- Installed  ---
@@ -145,9 +145,9 @@ class NotificationManager:
         )
         
         if is_test:
-            text += f"<i>This is a TEST signal - not for trading</i>\n"
+            text += "<i>This is a TEST signal - not for trading</i>\n"
         
-        text += f"─────────────────────\n"
+        text += "─────────────────────\n"
         text += f"<i>Timestamp: {datetime.utcnow().strftime('%H:%M:%S')} UTC</i>"
         
         await self._send_telegram_message(text)

@@ -6,7 +6,6 @@ from datetime import UTC, datetime, timedelta
 
 # --- Installed  ---
 import asyncpg
-from loguru import logger as log
 
 # --- Local Application Imports ---
 from trading_shared.clients.postgres_client import PostgresClient

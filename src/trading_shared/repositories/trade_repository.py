@@ -1,7 +1,7 @@
 # src/trading_shared/repositories/trade_repository.py
 
 # --- Built Ins ---
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any
 
 # --- Installed ---
 import asyncpg
