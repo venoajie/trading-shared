@@ -88,7 +88,7 @@ class CustomRedisClient:
                 redis_url_as_string = str(self._settings.url)
 
                 self._pool = aioredis.from_url(
-                    redis_url_as_string, # <-- USE THE CASTED STRING
+                    redis_url_as_string,  # <-- USE THE CASTED STRING
                     password=password_value,
                     db=int(self._settings.db or 0),
                     socket_connect_timeout=self._settings.socket_connect_timeout,
@@ -498,10 +498,10 @@ class CustomRedisClient:
         return await self.execute_resiliently(command, f"GET {key}")
 
     async def publish(
-        self, 
-        channel: str, 
+        self,
+        channel: str,
         message: str | bytes,
-        ):
+    ):
         """Publishes a message to a channel."""
 
         async def command(conn: aioredis.Redis):
@@ -510,30 +510,30 @@ class CustomRedisClient:
         await self.execute_resiliently(command, f"PUBLISH {channel}")
 
     async def set(
-        self, 
-        key: str, 
-        value: str, 
+        self,
+        key: str,
+        value: str,
         ex: int | None = None,
-        ):
+    ):
         async def command(conn: aioredis.Redis):
             await conn.set(key, value, ex=ex)
 
         await self.execute_resiliently(command, f"SET {key}")
 
     async def hget(
-        self, 
-        name: str, 
+        self,
+        name: str,
         key: str,
-        ) -> Optional[bytes]:
+    ) -> Optional[bytes]:
         async def command(conn: aioredis.Redis):
             return await conn.hget(name, key)
 
         return await self.execute_resiliently(command, f"HGET {name}")
 
     async def hgetall(
-        self, 
+        self,
         name: str,
-        ) -> dict[bytes, bytes]:
+    ) -> dict[bytes, bytes]:
         """Returns all fields and values of the hash stored at key."""
 
         async def command(conn: aioredis.Redis):
@@ -542,12 +542,12 @@ class CustomRedisClient:
         return await self.execute_resiliently(command, f"HGETALL {name}")
 
     async def hset(
-        self, 
-        name: str, 
-        key: str | None = None, 
+        self,
+        name: str,
+        key: str | None = None,
         value: Any = None,
         mapping: dict | None = None,
-        ):
+    ):
         """
         Sets a field in a hash. Supports either a single key/value pair
         or a mapping of multiple key/value pairs.
@@ -556,29 +556,31 @@ class CustomRedisClient:
             # Multi-field update
             async def command(conn: aioredis.Redis):
                 await conn.hset(name, mapping=mapping)
+
             await self.execute_resiliently(command, f"HSET {name} [MAPPING]")
         elif key is not None:
             # Single-field update
             async def command(conn: aioredis.Redis):
                 await conn.hset(name, key, value)
+
             await self.execute_resiliently(command, f"HSET {name}")
         else:
             raise ValueError("hset requires either a key/value pair or a mapping.")
 
     async def expire(
-        self, 
-        name: str, 
+        self,
+        name: str,
         time: int,
-        ):
+    ):
         """
         Sets a timeout on a key.
         """
+
         async def command(conn: aioredis.Redis):
             return await conn.expire(name, time)
 
         await self.execute_resiliently(command, f"EXPIRE {name}")
-    
-    
+
     async def xadd(
         self,
         name: str,
