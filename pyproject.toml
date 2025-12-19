@@ -1,4 +1,4 @@
-# pyproject.toml
+## pyproject.toml
 
 [project]
 name = "trading-shared"
