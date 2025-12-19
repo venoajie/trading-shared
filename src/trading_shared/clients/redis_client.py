@@ -1,4 +1,3 @@
-
 # src/trading_shared/clients/redis_client.py
 
 # --- Built Ins  ---
@@ -86,10 +85,6 @@ class CustomRedisClient:
                     else None
                 )
 
-                # ===============================================================
-                # THE FIX: Explicitly cast the Pydantic RedisDsn object to a string
-                # before passing it to the underlying redis-py library.
-                # ===============================================================
                 redis_url_as_string = str(self._settings.url)
 
                 self._pool = aioredis.from_url(
@@ -502,7 +497,11 @@ class CustomRedisClient:
 
         return await self.execute_resiliently(command, f"GET {key}")
 
-    async def publish(self, channel: str, message: str | bytes):
+    async def publish(
+        self, 
+        channel: str, 
+        message: str | bytes,
+        ):
         """Publishes a message to a channel."""
 
         async def command(conn: aioredis.Redis):
@@ -510,7 +509,12 @@ class CustomRedisClient:
 
         await self.execute_resiliently(command, f"PUBLISH {channel}")
 
-    async def set(self, key: str, value: str, ex: int | None = None):
+    async def set(
+        self, 
+        key: str, 
+        value: str, 
+        ex: int | None = None,
+        ):
         async def command(conn: aioredis.Redis):
             await conn.set(key, value, ex=ex)
 
@@ -530,11 +534,29 @@ class CustomRedisClient:
 
         return await self.execute_resiliently(command, f"HGETALL {name}")
 
-    async def hset(self, name: str, key: str, value: Any):
-        async def command(conn: aioredis.Redis):
-            await conn.hset(name, key, value)
-
-        await self.execute_resiliently(command, f"HSET {name}")
+    async def hset(
+        self, 
+        name: str, 
+        key: str | None = None, 
+        value: Any = None,
+        mapping: dict | None = None,
+        ):
+        """
+        Sets a field in a hash. Supports either a single key/value pair
+        or a mapping of multiple key/value pairs.
+        """
+        if mapping is not None:
+            # Multi-field update
+            async def command(conn: aioredis.Redis):
+                await conn.hset(name, mapping=mapping)
+            await self.execute_resiliently(command, f"HSET {name} [MAPPING]")
+        elif key is not None:
+            # Single-field update
+            async def command(conn: aioredis.Redis):
+                await conn.hset(name, key, value)
+            await self.execute_resiliently(command, f"HSET {name}")
+        else:
+            raise ValueError("hset requires either a key/value pair or a mapping.")
 
     async def xadd(
         self,
