@@ -15,6 +15,7 @@ import redis.asyncio as aioredis
 from loguru import logger as log
 from redis import exceptions as redis_exceptions
 from redis.asyncio.client import PubSub
+from redis.asyncio.client import Pipeline
 
 # --- Local Application Imports ---
 from ..config.models import RedisSettings
@@ -491,6 +492,18 @@ class CustomRedisClient:
                 f"Could not set system state to '{state}' due to Redis connection error."
             )
 
+    async def get_client(self) -> aioredis.Redis:
+        """Returns a client instance from the connection pool."""
+        pool = await self._get_pool()
+        return aioredis.Redis(connection_pool=pool)
+
+    async def pipeline(self, transaction: bool = True) -> Pipeline:
+        """
+        Returns a pipeline object from the underlying client, allowing for atomic transactions.
+        """
+        client = await self.get_client()
+        return client.pipeline(transaction=transaction)
+    
     async def get(self, key: str) -> bytes | None:
         async def command(conn: aioredis.Redis) -> bytes | None:
             return await conn.get(key)
@@ -675,3 +688,12 @@ class CustomRedisClient:
             except ConnectionError as e:
                 log.error(f"Redis reconnection failed: {e}")
                 return False
+
+
+    async def sadd(self, key: str, *values):
+        client = await self.get_client()
+        await client.sadd(key, *values)
+        
+    async def smembers(self, key: str) -> set:
+        client = await self.get_client()
+        return await client.smembers(key)
