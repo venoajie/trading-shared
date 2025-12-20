@@ -30,7 +30,7 @@ class SystemStateRepository:
 
         try:
             # The pipeline ensures the delete and sadd operations are atomic.
-            async with self.redis.pipeline(transaction=True) as pipe:
+            async with await self.redis.pipeline(transaction=True) as pipe:
                 pipe.delete(self.ANALYZER_TARGETS_KEY)
                 pipe.sadd(self.ANALYZER_TARGETS_KEY, *symbols)
                 await pipe.execute()
