@@ -1,57 +1,26 @@
-# src/shared_utils/notifications/manager.py
+
+# src/trading_shared/notifications/manager.py
 
 import asyncio
-from typing import Union, Optional
-from datetime import datetime
+from typing import Optional
 import aiohttp
 from loguru import logger as log
-from pydantic import SecretStr
-from trading_engine_core.models import SystemAlert, TradeNotification, SignalEvent
+from trading_engine_core.models import SignalEvent
 
-def _get_secret_value(secret: Union[SecretStr, str, None]) -> Optional[str]:
-    if secret is None: 
-        return None
-    return secret.get_secret_value() if isinstance(secret, SecretStr) else secret
 
 class NotificationManager:
+    """Manages the formatting and dispatching of notifications."""
+
     def __init__(
         self,
         session: aiohttp.ClientSession,
-        telegram_token: Union[str, SecretStr],
-        telegram_chat_id: str,
+        telegram_token: Optional[str],
+        telegram_chat_id: Optional[str],
     ):
         self._session = session
+        self._telegram_token = telegram_token
         self._telegram_chat_id = telegram_chat_id
-        self._send_lock = asyncio.Lock()
-        
-        token_val = _get_secret_value(telegram_token)
-        
-        if token_val and telegram_chat_id:
-            self.enabled = True
-            self._base_url = f"https://api.telegram.org/bot{token_val}/sendMessage"
-            masked_token = f"{token_val[:4]}...{token_val[-4:]}" if len(token_val) > 10 else "******"
-            log.success(f"✅ Telegram Notifications ENABLED | Chat ID: {telegram_chat_id}")
-        else:
-            self.enabled = False
-            log.warning("⚠️ Telegram Notifications DISABLED | Missing Credentials")
-
-    async def _send_telegram_message(self, text: str):
-        if not self.enabled: return
-        params = {"chat_id": self._telegram_chat_id, "text": text, "parse_mode": "HTML"}
-        async with self._send_lock:
-            for attempt in range(1, 4):
-                try:
-                    async with self._session.post(self._base_url, params=params, timeout=10) as resp:
-                        if resp.status == 200: return
-                        if resp.status == 429:
-                            retry = (await resp.json()).get("parameters", {}).get("retry_after", 5)
-                            await asyncio.sleep(retry + 1)
-                        else:
-                            log.error(f"Telegram API Error {resp.status}: {await resp.text()}")
-                            return
-                except Exception as e:
-                    log.error(f"Telegram Connection Error: {e}")
-                    await asyncio.sleep(1)
+        self.is_telegram_enabled = bool(telegram_token and telegram_chat_id)
 
     # --- Helper Functions for Formatting ---
     def _format_currency(self, value: float, precision: int = 2) -> str:
@@ -106,14 +75,19 @@ class NotificationManager:
             f"─────────────────────"
         )
 
+    # --- Main Dispatcher ---
     async def send_signal_alert(self, signal: SignalEvent):
-
+        """
+        Routes a signal to the appropriate formatter and sends the alert.
+        """
+        message = ""
+        # Router to select the correct formatting based on signal type
         if signal.signal_type == "VOLUME_SPIKE":
             message = self._format_volume_spike_message(signal)
         else:
             # Fallback for other signal types
             message = f"Received generic signal for {signal.symbol}: {signal.signal_type}"
-            
+
         if message:
             await self.send_telegram_message(message)
 
