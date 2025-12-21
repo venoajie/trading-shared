@@ -53,41 +53,90 @@ class NotificationManager:
                     log.error(f"Telegram Connection Error: {e}")
                     await asyncio.sleep(1)
 
+    # --- Helper Functions for Formatting ---
+    def _format_currency(self, value: float, precision: int = 2) -> str:
+        if value > 1_000_000_000:
+            return f"${value/1_000_000_000:.{precision}f}B"
+        if value > 1_000_000:
+            return f"${value/1_000_000:.{precision}f}M"
+        if value > 1_000:
+            return f"${value/1_000:.{precision}f}K"
+        return f"${value:.{precision}f}"
+
+    def _format_percent(self, value: float) -> str:
+        return f"{'+' if value >= 0 else ''}{value:.2%}"
+
+    # --- Message Formatting Logic ---
+    def _format_volume_spike_message(self, signal: SignalEvent) -> str:
+        """Constructs the detailed message for a VOLUME_SPIKE signal."""
+        metrics = signal.metadata.get("metrics", {})
+        
+        # Extract and default all required values
+        pair = signal.symbol
+        rvol = metrics.get("rvol", 0.0)
+        current_vol = metrics.get("current_volume", 0.0)
+        avg_vol = metrics.get("average_volume_20m", 0.0)
+        vol_1h = metrics.get("volume_1h", 0.0)
+        price_change_1h = metrics.get("price_change_1h", 0.0)
+        price_start = metrics.get("price_1h_start", 0.0)
+        price_end = metrics.get("price_1h_end", 0.0)
+        test_mode = metrics.get("test_mode", False)
+
+        header = "🧪 TEST 📢 VOLUME SPIKE DETECTED 🔵" if test_mode else "⚡ LIVE 📢 VOLUME SPIKE DETECTED 🔴"
+        
+        # Determine price precision based on magnitude
+        price_precision = 8 if price_start < 0.001 else 4
+
+        return (
+            f"{header}\n"
+            f"─────────────────────\n"
+            f"Pair: {pair}\n"
+            f"Strategy: {signal.strategy_name}\n"
+            f"─────────────────────\n"
+            f"Volume Analysis:\n"
+            f"  › Spike (RVOL): {rvol:.2f}x\n"
+            f"  › Current Volume: {self._format_currency(current_vol, 0)}\n"
+            f"  › Average Volume: {self._format_currency(avg_vol, 0)}\n"
+            f"  › 1h Total Volume: {self._format_currency(vol_1h)}\n"
+            f"─────────────────────\n"
+            f"Price Analysis (1h):\n"
+            f"  › Change: {self._format_percent(price_change_1h)}\n"
+            f"  › Start:  ${price_start:.{price_precision}f}\n"
+            f"  › End:    ${price_end:.{price_precision}f}\n"
+            f"─────────────────────"
+        )
+
     async def send_signal_alert(self, signal: SignalEvent):
-        if not self.enabled: return
-        
-        meta = signal.metadata
-        context = meta.get("context", {})
-        trigger = meta.get("trigger", {})
 
-        # --- REFACTORED HEADER LOGIC (NEUTRAL) ---
-        is_test = context.get("test_mode", False) or meta.get("test_mode", False)
-        
-        # Default neutral styling
-        emoji = "📢"
-        color = "🔵"
-        title_text = "VOLUME SPIKE DETECTED"
+        if signal.signal_type == "VOLUME_SPIKE":
+            message = self._format_volume_spike_message(signal)
+        else:
+            # Fallback for other signal types
+            message = f"Received generic signal for {signal.symbol}: {signal.signal_type}"
+            
+        if message:
+            await self.send_telegram_message(message)
 
-        # Construct Title
-        title = f"{'🧪 TEST ' if is_test else ''}{emoji} {title_text} {color}"
+    async def send_telegram_message(self, text: str):
+        if not self.is_telegram_enabled:
+            log.warning("Telegram notifications are disabled (token/chat_id not set).")
+            return
 
-        # --- DATA EXTRACTION (1H FOCUS) ---
-        # Prioritize "trigger" dict (V2 protocol), fallback to root meta (V1)
-        rvol = trigger.get("rvol", meta.get("rvol", 0.0))
-        
-        # New 1h Metrics
-        vol_1h = context.get("volume_1h", meta.get("volume_1h", 0.0))
-        chg_1h = trigger.get("price_change_1h", meta.get("price_change_1h", 0.0))
-        
-        lines = [
-            f"<b>{title}</b>",
-            "─────────────────────",
-            f"<b>Pair:</b> <code>{signal.symbol}</code>",
-            f"<b>Spike (RVOL):</b> {rvol:.2f}x",
-            f"<b>1h Volume:</b> ${vol_1h:,.0f}",
-            f"<b>1h Change:</b> {chg_1h:+.2f}%",
-            f"<b>Strategy:</b> {signal.strategy_name}",
-            "─────────────────────",
-            f"<i>Time: {datetime.utcnow().strftime('%H:%M:%S')} UTC</i>"
-        ]
-        await self._send_telegram_message("\n".join(lines))
+        api_url = f"https://api.telegram.org/bot{self._telegram_token}/sendMessage"
+        payload = {
+            "chat_id": self._telegram_chat_id,
+            "text": f"```\n{text}\n```",  # Use markdown for a monospaced block
+            "parse_mode": "MarkdownV2",
+        }
+        try:
+            async with self._session.post(api_url, json=payload, timeout=10) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    log.error(
+                        f"Failed to send Telegram message. Status: {response.status}, "
+                        f"Response: {error_text}"
+                    )
+        except asyncio.TimeoutError:
+            log.error("Request to Telegram API timed out.")
+        except Exception:
+            log.exception("An unexpected error occurred while sending Telegram message.")
