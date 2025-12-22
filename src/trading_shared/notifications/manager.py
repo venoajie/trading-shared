@@ -149,9 +149,18 @@ class NotificationManager:
             return
 
         api_url = f"https://api.telegram.org/bot{self._telegram_token}/sendMessage"
+        
+        # --- START: DIAGNOSTIC ADDITION ---
+        # Log the exact URL being requested, with the token redacted for security.
+        # This will prove the URL structure is correct.
+        redacted_token = self._telegram_token[:8] + "..." + self._telegram_token[-4:]
+        redacted_url = f"https://api.telegram.org/bot{redacted_token}/sendMessage"
+        log.info(f"Sending POST request to Telegram API URL: {redacted_url}")
+        # --- END: DIAGNOSTIC ADDITION ---
+
         payload = {
             "chat_id": self._telegram_chat_id,
-            "text": f"```\n{text}\n```",  # Use markdown for a monospaced block
+            "text": f"```\n{text}\n```",
             "parse_mode": "MarkdownV2",
         }
         try:
