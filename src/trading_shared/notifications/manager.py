@@ -53,12 +53,10 @@ class NotificationManager:
                     log.success(f"Telegram token is valid. Connected to bot: @{bot_username}")
                     return
 
-                # This is the critical check for the 404 error
                 if response.status == 404:
                     log.critical("Telegram token verification failed: API returned 404 Not Found.")
                     raise ConnectionRefusedError("The provided Telegram Bot Token is invalid or revoked.")
-                
-                # Handle other potential auth errors
+
                 if response.status == 401:
                     log.critical("Telegram token verification failed: API returned 401 Unauthorized.")
                     raise ConnectionRefusedError("The provided Telegram Bot Token is unauthorized.")
@@ -73,7 +71,7 @@ class NotificationManager:
         except Exception as e:
             log.exception("An unexpected error occurred during Telegram token verification.")
             raise e
-            
+
     # --- Helper Functions for Formatting ---
     def _format_currency(self, value: float, precision: int = 2) -> str:
         if value > 1_000_000_000:
@@ -91,8 +89,7 @@ class NotificationManager:
     def _format_volume_spike_message(self, signal: SignalEvent) -> str:
         """Constructs the detailed message for a VOLUME_SPIKE signal."""
         metrics = signal.metadata.get("metrics", {})
-        
-        # Extract and default all required values
+
         pair = signal.symbol
         rvol = metrics.get("rvol", 0.0)
         current_vol = metrics.get("current_volume", 0.0)
@@ -105,7 +102,6 @@ class NotificationManager:
 
         header = "🧪 TEST 📢 VOLUME SPIKE DETECTED 🔵" if test_mode else "⚡ LIVE 📢 VOLUME SPIKE DETECTED 🔴"
         
-        # Determine price precision based on magnitude
         price_precision = 8 if price_start < 0.001 else 4
 
         return (
@@ -129,15 +125,10 @@ class NotificationManager:
 
     # --- Main Dispatcher ---
     async def send_signal_alert(self, signal: SignalEvent):
-        """
-        Routes a signal to the appropriate formatter and sends the alert.
-        """
         message = ""
-        # Router to select the correct formatting based on signal type
         if signal.signal_type == "VOLUME_SPIKE":
             message = self._format_volume_spike_message(signal)
         else:
-            # Fallback for other signal types
             message = f"Received generic signal for {signal.symbol}: {signal.signal_type}"
 
         if message:
@@ -145,19 +136,9 @@ class NotificationManager:
 
     async def send_telegram_message(self, text: str):
         if not self.is_telegram_enabled:
-            log.warning("Telegram notifications are disabled (token/chat_id not set).")
             return
 
         api_url = f"https://api.telegram.org/bot{self._telegram_token}/sendMessage"
-        
-        # --- START: DIAGNOSTIC ADDITION ---
-        # Log the exact URL being requested, with the token redacted for security.
-        # This will prove the URL structure is correct.
-        redacted_token = self._telegram_token[:8] + "..." + self._telegram_token[-4:]
-        redacted_url = f"https://api.telegram.org/bot{redacted_token}/sendMessage"
-        log.info(f"Sending POST request to Telegram API URL: {redacted_url}")
-        # --- END: DIAGNOSTIC ADDITION ---
-
         payload = {
             "chat_id": self._telegram_chat_id,
             "text": f"```\n{text}\n```",
