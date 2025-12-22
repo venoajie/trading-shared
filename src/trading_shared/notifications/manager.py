@@ -2,7 +2,7 @@
 # src/trading_shared/notifications/manager.py
 
 import asyncio
-from typing import Optional
+from typing import Optional, Self
 import aiohttp
 from loguru import logger as log
 from trading_engine_core.models import SignalEvent
@@ -22,6 +22,58 @@ class NotificationManager:
         self._telegram_chat_id = telegram_chat_id
         self.is_telegram_enabled = bool(telegram_token and telegram_chat_id)
 
+    @classmethod
+    async def create(
+        cls,
+        session: aiohttp.ClientSession,
+        telegram_token: Optional[str],
+        telegram_chat_id: Optional[str],
+    ) -> Self:
+        """
+        Asynchronously creates and validates a NotificationManager instance.
+        """
+        manager = cls(session, telegram_token, telegram_chat_id)
+        if manager.is_telegram_enabled:
+            await manager._verify_token_on_startup()
+        else:
+            log.warning("Telegram notifications are disabled (token/chat_id not set).")
+        return manager
+
+    async def _verify_token_on_startup(self):
+        """
+        Performs a 'getMe' API call to verify the bot token is valid at service startup.
+        """
+        log.info("Verifying Telegram Bot Token with the 'getMe' API endpoint...")
+        api_url = f"https://api.telegram.org/bot{self._telegram_token}/getMe"
+        try:
+            async with self._session.get(api_url, timeout=10) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    bot_username = data.get("result", {}).get("username")
+                    log.success(f"Telegram token is valid. Connected to bot: @{bot_username}")
+                    return
+
+                # This is the critical check for the 404 error
+                if response.status == 404:
+                    log.critical("Telegram token verification failed: API returned 404 Not Found.")
+                    raise ConnectionRefusedError("The provided Telegram Bot Token is invalid or revoked.")
+                
+                # Handle other potential auth errors
+                if response.status == 401:
+                    log.critical("Telegram token verification failed: API returned 401 Unauthorized.")
+                    raise ConnectionRefusedError("The provided Telegram Bot Token is unauthorized.")
+
+                error_text = await response.text()
+                log.error(f"Telegram token verification failed with status {response.status}: {error_text}")
+                raise ConnectionError("Failed to verify Telegram token.")
+
+        except asyncio.TimeoutError:
+            log.error("Request to Telegram API timed out during token verification.")
+            raise
+        except Exception as e:
+            log.exception("An unexpected error occurred during Telegram token verification.")
+            raise e
+            
     # --- Helper Functions for Formatting ---
     def _format_currency(self, value: float, precision: int = 2) -> str:
         if value > 1_000_000_000:
