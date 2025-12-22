@@ -1,6 +1,5 @@
-
 # src/trading_shared/notifications/manager.py
-
+            
 import asyncio
 from typing import Optional, Self
 import aiohttp
@@ -87,14 +86,17 @@ class NotificationManager:
 
     # --- Message Formatting Logic ---
     def _format_volume_spike_message(self, signal: SignalEvent) -> str:
-        """Constructs the detailed message for a VOLUME_SPIKE signal."""
+        """[CORRECTED] Constructs the detailed message using quote (USD) volume keys."""
         metrics = signal.metadata.get("metrics", {})
 
         pair = signal.symbol
         rvol = metrics.get("rvol", 0.0)
-        current_vol = metrics.get("current_volume", 0.0)
-        avg_vol = metrics.get("average_volume_20m", 0.0)
-        vol_1h = metrics.get("volume_1h", 0.0)
+        
+        # [CORRECTED] Use the explicit 'quote_volume' keys for all currency formatting.
+        current_vol = metrics.get("current_quote_volume", 0.0)
+        avg_vol = metrics.get("avg_quote_volume_20m", 0.0)
+        vol_1h = metrics.get("quote_volume_1h", 0.0)
+        
         price_change_1h = metrics.get("price_change_1h", 0.0)
         price_start = metrics.get("price_1h_start", 0.0)
         price_end = metrics.get("price_1h_end", 0.0)
