@@ -67,7 +67,11 @@ class CustomRedisClient:
                 self._circuit_open = False
 
             try:
-                password_value = self._settings.password.get_secret_value() if self._settings.password else None
+                password_value = (
+                    self._settings.password.get_secret_value()
+                    if self._settings.password
+                    else None
+                )
                 redis_url_as_string = str(self._settings.url)
 
                 self._client = aioredis.from_url(
@@ -75,7 +79,7 @@ class CustomRedisClient:
                     password=password_value,
                     db=int(self._settings.db or 0),
                     socket_connect_timeout=self._settings.socket_connect_timeout,
-                    decode_responses=False, # Must be false for orjson
+                    decode_responses=False,  # Must be false for orjson
                 )
                 await asyncio.wait_for(self._client.ping(), timeout=10)
                 self._reconnect_attempts = 0
@@ -87,8 +91,10 @@ class CustomRedisClient:
                 self._circuit_open = True
                 self._last_failure = time.time()
                 self._reconnect_attempts += 1
-                raise ConnectionError("Redis connection failed on initial attempt.") from e
-            
+                raise ConnectionError(
+                    "Redis connection failed on initial attempt."
+                ) from e
+
     async def _safe_close_client(self):
         """Safely closes the current client instance, ignoring errors."""
         client_to_close = self._client
@@ -98,7 +104,7 @@ class CustomRedisClient:
                 await client_to_close.close()
             except Exception as e:
                 log.warning(f"Non-critical error while closing stale Redis client: {e}")
-              
+
     async def close(self):
         async with self._lock:
             await self._safe_close_client()
@@ -118,7 +124,7 @@ class CustomRedisClient:
 
         for attempt in range(max_retries):
             try:
-                client =await self._get_client()
+                client = await self._get_client()
                 # Check if pool is None before using it
                 if client is None:
                     raise ConnectionError(
@@ -462,12 +468,12 @@ class CustomRedisClient:
     async def pipeline(self, transaction: bool = True) -> Pipeline:
         """
         Returns a pipeline object from the underlying client, allowing for atomic transactions.
-        """    
+        """
         # Pipeline creation itself doesn't need resilience, as it's a local object.
         # The resilience is applied when pipe.execute() is called.
         client = await self._get_client()
         return client.pipeline(transaction=transaction)
-    
+
     async def get(self, key: str) -> bytes | None:
         async def command(conn: aioredis.Redis) -> bytes | None:
             return await conn.get(key)
@@ -653,12 +659,13 @@ class CustomRedisClient:
                 log.error(f"Redis reconnection failed: {e}")
                 return False
 
-
     async def sadd(self, key: str, *values):
-        if not values: return
+        if not values:
+            return
         return await self.execute_resiliently(
             lambda client: client.sadd(key, *values), f"SADD {key}"
-        )        
+        )
+
     async def smembers(self, key: str) -> set:
         return await self.execute_resiliently(
             lambda client: client.smembers(key), f"SMEMBERS {key}"

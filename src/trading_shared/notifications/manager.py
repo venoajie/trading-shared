@@ -1,5 +1,5 @@
 # src/trading_shared/notifications/manager.py
-            
+
 import asyncio
 from typing import Optional, Self
 import aiohttp
@@ -49,36 +49,50 @@ class NotificationManager:
                 if response.status == 200:
                     data = await response.json()
                     bot_username = data.get("result", {}).get("username")
-                    log.success(f"Telegram token is valid. Connected to bot: @{bot_username}")
+                    log.success(
+                        f"Telegram token is valid. Connected to bot: @{bot_username}"
+                    )
                     return
 
                 if response.status == 404:
-                    log.critical("Telegram token verification failed: API returned 404 Not Found.")
-                    raise ConnectionRefusedError("The provided Telegram Bot Token is invalid or revoked.")
+                    log.critical(
+                        "Telegram token verification failed: API returned 404 Not Found."
+                    )
+                    raise ConnectionRefusedError(
+                        "The provided Telegram Bot Token is invalid or revoked."
+                    )
 
                 if response.status == 401:
-                    log.critical("Telegram token verification failed: API returned 401 Unauthorized.")
-                    raise ConnectionRefusedError("The provided Telegram Bot Token is unauthorized.")
+                    log.critical(
+                        "Telegram token verification failed: API returned 401 Unauthorized."
+                    )
+                    raise ConnectionRefusedError(
+                        "The provided Telegram Bot Token is unauthorized."
+                    )
 
                 error_text = await response.text()
-                log.error(f"Telegram token verification failed with status {response.status}: {error_text}")
+                log.error(
+                    f"Telegram token verification failed with status {response.status}: {error_text}"
+                )
                 raise ConnectionError("Failed to verify Telegram token.")
 
         except asyncio.TimeoutError:
             log.error("Request to Telegram API timed out during token verification.")
             raise
         except Exception as e:
-            log.exception("An unexpected error occurred during Telegram token verification.")
+            log.exception(
+                "An unexpected error occurred during Telegram token verification."
+            )
             raise e
 
     # --- Helper Functions for Formatting ---
     def _format_currency(self, value: float, precision: int = 2) -> str:
         if value > 1_000_000_000:
-            return f"${value/1_000_000_000:.{precision}f}B"
+            return f"${value / 1_000_000_000:.{precision}f}B"
         if value > 1_000_000:
-            return f"${value/1_000_000:.{precision}f}M"
+            return f"${value / 1_000_000:.{precision}f}M"
         if value > 1_000:
-            return f"${value/1_000:.{precision}f}K"
+            return f"${value / 1_000:.{precision}f}K"
         return f"${value:.{precision}f}"
 
     def _format_percent(self, value: float) -> str:
@@ -91,26 +105,30 @@ class NotificationManager:
 
         pair = signal.symbol
         rvol = metrics.get("rvol", 0.0)
-        
+
         # Use the explicit 'quote_volume' keys for all currency formatting.
         current_vol = metrics.get("current_quote_volume", 0.0)
         avg_vol = metrics.get("avg_quote_volume_20m", 0.0)
         vol_1h = metrics.get("quote_volume_1h", 0.0)
-        
+
         price_change_1h = metrics.get("price_change_1h", 0.0)
         price_start = metrics.get("price_1h_start", 0.0)
         price_end = metrics.get("price_1h_end", 0.0)
         test_mode = metrics.get("test_mode", False)
 
-        header = "🧪 TEST 📢 VOLUME SPIKE DETECTED 🔵" if test_mode else "⚡ LIVE 📢 VOLUME SPIKE DETECTED 🔴"
-        
+        header = (
+            "🧪 TEST 📢 VOLUME SPIKE DETECTED 🔵"
+            if test_mode
+            else "⚡ LIVE 📢 VOLUME SPIKE DETECTED 🔴"
+        )
+
         price_precision = 8 if price_start < 0.001 else 4
 
         return (
             f"{header}\n"
             f"─────────────────────\n"
             f"Pair: {pair}\n"
-            #f"Strategy: {signal.strategy_name}\n"
+            # f"Strategy: {signal.strategy_name}\n"
             f"─────────────────────\n"
             f"Volume Analysis:\n"
             f"  › Spike (RVOL): {rvol:.2f}x\n"
@@ -131,7 +149,9 @@ class NotificationManager:
         if signal.signal_type == "VOLUME_SPIKE":
             message = self._format_volume_spike_message(signal)
         else:
-            message = f"Received generic signal for {signal.symbol}: {signal.signal_type}"
+            message = (
+                f"Received generic signal for {signal.symbol}: {signal.signal_type}"
+            )
 
         if message:
             await self.send_telegram_message(message)
@@ -147,7 +167,9 @@ class NotificationManager:
             "parse_mode": "MarkdownV2",
         }
         try:
-            async with self._session.post(api_url, json=payload, timeout=10) as response:
+            async with self._session.post(
+                api_url, json=payload, timeout=10
+            ) as response:
                 if response.status != 200:
                     error_text = await response.text()
                     log.error(
@@ -157,4 +179,6 @@ class NotificationManager:
         except asyncio.TimeoutError:
             log.error("Request to Telegram API timed out.")
         except Exception:
-            log.exception("An unexpected error occurred while sending Telegram message.")
+            log.exception(
+                "An unexpected error occurred while sending Telegram message."
+            )
