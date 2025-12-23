@@ -86,13 +86,13 @@ class NotificationManager:
 
     # --- Message Formatting Logic ---
     def _format_volume_spike_message(self, signal: SignalEvent) -> str:
-        """[CORRECTED] Constructs the detailed message using quote (USD) volume keys."""
+        """Constructs the detailed message using quote (USD) volume keys."""
         metrics = signal.metadata.get("metrics", {})
 
         pair = signal.symbol
         rvol = metrics.get("rvol", 0.0)
         
-        # [CORRECTED] Use the explicit 'quote_volume' keys for all currency formatting.
+        # Use the explicit 'quote_volume' keys for all currency formatting.
         current_vol = metrics.get("current_quote_volume", 0.0)
         avg_vol = metrics.get("avg_quote_volume_20m", 0.0)
         vol_1h = metrics.get("quote_volume_1h", 0.0)
@@ -110,7 +110,7 @@ class NotificationManager:
             f"{header}\n"
             f"─────────────────────\n"
             f"Pair: {pair}\n"
-            f"Strategy: {signal.strategy_name}\n"
+            #f"Strategy: {signal.strategy_name}\n"
             f"─────────────────────\n"
             f"Volume Analysis:\n"
             f"  › Spike (RVOL): {rvol:.2f}x\n"
