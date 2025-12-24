@@ -1,3 +1,4 @@
+
 # src/trading_shared/exchanges/websockets/binance.py
 
 # --- Built Ins  ---
@@ -35,14 +36,12 @@ class BinanceWsClient(AbstractWsClient):
         market_data_repo: MarketDataRepository,
         settings: ExchangeSettings,
         instruments_to_subscribe: List[Dict[str, Any]],
-        # Suffix to identify connection chunks in logs
         market_id_suffix: str = "",
         control_channel: str | None = None,
     ):
         super().__init__(
             market_definition, market_data_repo, instrument_repo, redis_client
         )
-        # Adjust market_id for logging
         if market_id_suffix:
             self.market_def.market_id = (
                 f"{self.market_def.market_id}_{market_id_suffix}"
@@ -54,15 +53,9 @@ class BinanceWsClient(AbstractWsClient):
             f"{inst['instrument_name'].lower()}@trade"
             for inst in self.instruments_to_subscribe
         }
-
-        self._chunk_instrument_names = {
-            inst["instrument_name"].lower() for inst in self.instruments_to_subscribe
-        }
-
         self._ws: websockets.WebSocketClientProtocol | None = None
         self._is_running = asyncio.Event()
 
-        # Set control channel (shared or per-chunk)
         if control_channel:
             self._control_channel = control_channel
         else:
@@ -70,135 +63,94 @@ class BinanceWsClient(AbstractWsClient):
 
         self.settings = settings
         self.redis_client = redis_client
-        self._redis_semaphore = asyncio.Semaphore(5)  # Limit concurrent Redis ops
         if not self._control_channel:
             raise ValueError("Binance subscription control channel not configured.")
 
-    async def _send_subscription_request(
-        self,
-        method: str,
-        params: list,
-    ):
-        if not self._ws:
-            log.warning("WebSocket is not connected. Cannot send subscription request.")
+    async def _send_subscription_request(self, method: str, params: list):
+        if not self._ws or not self._ws.open:
+            log.warning(f"[{self.market_def.market_id}] WebSocket is not connected. Cannot send '{method}' request.")
             return
 
         request_id = int(asyncio.get_running_loop().time() * 1000)
-        payload = {"method": method, "params": params, "id": request_id}
-        log.info(f"Sending request to Binance WS: {payload}")
+        payload = {"method": method.upper(), "params": params, "id": request_id}
+        log.info(f"[{self.market_def.market_id}] Sending WS request: {payload}")
         await self._ws.send(orjson.dumps(payload))
 
     async def _control_channel_listener(self):
-        """Listens on a Redis channel for subscription management commands."""
-        log.info(
-            f"Listening for subscription commands on Redis channel: '{self._control_channel}'"
-        )
+        """
+        [CORRECTED] Listens for universe state updates and calculates subscription deltas.
+        """
+        log.info(f"[{self.market_def.market_id}] Listening for commands on '{self._control_channel}'")
 
-        # OUTER LOOP: Handles Reconnection
         while self._is_running.is_set():
             try:
-                # Acquire a FRESH connection each time we enter this block
                 async with self.redis_client.pubsub() as pubsub:
                     await pubsub.subscribe(self._control_channel)
-                    log.debug(f"Subscribed to control channel: {self._control_channel}")
-
-                    # INNER LOOP: Processes Messages
                     while self._is_running.is_set():
                         try:
-                            message = await pubsub.get_message(
-                                ignore_subscribe_messages=True, timeout=1.0
-                            )
+                            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
                             if not message:
                                 continue
 
-                            log.info(
-                                f"Received command on control channel: {message['data']}"
-                            )
-                            command = orjson.loads(message["data"])
-                            action = command.get("action")
-                            symbols_to_modify = command.get("symbols", [])
+                            # --- START: Refactored Logic ---
+                            log.info(f"[{self.market_def.market_id}] Received new universe state on control channel.")
+                            full_universe_symbols: List[str] = orjson.loads(message["data"])
 
-                            if not symbols_to_modify:
+                            # Determine the target state for subscriptions for this client instance
+                            num_clients = 5 # This should ideally be passed in or discovered. Hardcoded to match receiver for now.
+                            client_index = int(self.market_def.market_id.split('_')[-1]) - 1
+                            
+                            # Distribute the full universe across the chunks
+                            chunk_symbols = sorted(full_universe_symbols)[client_index::num_clients]
+                            
+                            target_streams = {f"{symbol.lower()}@trade" for symbol in chunk_symbols}
+
+                            # Calculate the delta
+                            streams_to_add = list(target_streams - self._subscriptions)
+                            streams_to_remove = list(self._subscriptions - target_streams)
+
+                            if not streams_to_add and not streams_to_remove:
+                                log.debug(f"[{self.market_def.market_id}] No subscription change needed for this chunk.")
                                 continue
 
-                            # FILTER: Only process symbols in this chunk's instrument list
-                            filtered_symbols = [
-                                symbol
-                                for symbol in symbols_to_modify
-                                if symbol.lower() in self._chunk_instrument_names
-                            ]
+                            if streams_to_remove:
+                                await self._send_subscription_request("UNSUBSCRIBE", streams_to_remove)
+                            
+                            if streams_to_add:
+                                await self._send_subscription_request("SUBSCRIBE", streams_to_add)
 
-                            if not filtered_symbols:
-                                continue
+                            # Atomically update the internal state
+                            self._subscriptions = target_streams
+                            log.success(f"[{self.market_def.market_id}] Subscriptions updated: {len(streams_to_add)} added, {len(streams_to_remove)} removed.")
+                            # --- END: Refactored Logic ---
 
-                            streams_to_modify = [
-                                f"{symbol.lower().split('@')[0]}@trade"
-                                for symbol in filtered_symbols
-                            ]
-
-                            if action == "subscribe":
-                                new_subs = [
-                                    s
-                                    for s in streams_to_modify
-                                    if s not in self._subscriptions
-                                ]
-                                if new_subs:
-                                    await self._send_subscription_request(
-                                        "SUBSCRIBE", new_subs
-                                    )
-                                    self._subscriptions.update(new_subs)
-
-                            elif action == "unsubscribe":
-                                old_subs = [
-                                    s
-                                    for s in streams_to_modify
-                                    if s in self._subscriptions
-                                ]
-                                if old_subs:
-                                    await self._send_subscription_request(
-                                        "UNSUBSCRIBE", old_subs
-                                    )
-                                    self._subscriptions.difference_update(old_subs)
-
-                        except (orjson.JSONDecodeError, KeyError) as e:
-                            log.warning(f"Invalid command received: {e}")
-                            continue
-
-                        # CRITICAL: Catch connection errors inside the inner loop to break to the outer loop
+                        except (orjson.JSONDecodeError, KeyError, TypeError) as e:
+                            log.warning(f"[{self.market_def.market_id}] Invalid command received: {e}")
                         except (ConnectionError, OSError) as e:
-                            log.warning(
-                                f"Control channel connection lost: {e}. Reconnecting..."
-                            )
-                            break  # Breaks inner loop -> Context Manager closes -> Outer loop reconnects
-
+                            log.warning(f"[{self.market_def.market_id}] Control channel connection lost: {e}. Reconnecting...")
+                            break
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                log.error(
-                    f"Unexpected error in control channel listener: {e}", exc_info=True
-                )
-                await asyncio.sleep(5)  # Backoff before reconnecting
+                log.error(f"[{self.market_def.market_id}] Unexpected error in control channel listener: {e}", exc_info=True)
+                await asyncio.sleep(5)
 
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
         """
         Main message generator loop. Connects to the WebSocket and yields messages.
         """
-        stream_names = "/".join(self._subscriptions)
-        if not stream_names:
-            log.warning(
-                f"[{self.exchange_name}] No streams to subscribe to for market '{self.market_def.market_id}'. Client will be idle."
-            )
-            return
-
-        url = f"{self.ws_connection_url}?streams={stream_names}"
+        # Connect with no initial streams. Subscriptions will be managed dynamically.
+        url = f"{self.ws_connection_url}"
 
         try:
             log.info(f"[{self.exchange_name}] Connecting to: {url}")
             async with websockets.connect(url, ping_interval=20, ping_timeout=60) as ws:
                 self._ws = ws
-                log.success(
-                    f"[{self.exchange_name}] WebSocket connection established for market '{self.market_def.market_id}'."
-                )
+                log.success(f"[{self.exchange_name}] WebSocket connection established for '{self.market_def.market_id}'.")
+
+                # On successful connection, immediately try to subscribe to the current known set
+                if self._subscriptions:
+                    await self._send_subscription_request("SUBSCRIBE", list(self._subscriptions))
 
                 async for message in ws:
                     try:
@@ -213,36 +165,27 @@ class BinanceWsClient(AbstractWsClient):
 
                         yield StreamMessage(
                             exchange=self.exchange_name,
-                            channel=f"trade.{symbol}.{market_type_str}",  # Use 'trade' for consistency
+                            channel=f"trade.{symbol}.{market_type_str}",
                             timestamp=trade_data.get("T"),
                             data={
                                 "symbol": symbol,
                                 "market_type": market_type_str,
-                                "trade_id": trade_data.get(
-                                    "t"
-                                ),  # 't' is trade ID for individual trades
+                                "trade_id": trade_data.get("t"),
                                 "price": float(trade_data.get("p")),
                                 "quantity": float(trade_data.get("q")),
                                 "is_buyer_maker": trade_data.get("m"),
                             },
                         )
                     except (orjson.JSONDecodeError, TypeError, KeyError) as e:
-                        log.error(
-                            f"[{self.exchange_name}] Error processing message: {e}. Payload: {message}",
-                            exc_info=True,
-                        )
+                        log.error(f"[{self.exchange_name}] Error processing message: {e}. Payload: {message}", exc_info=True)
         finally:
             self._ws = None
             log.warning(f"[{self.exchange_name}] Disconnected from {url}.")
 
     async def process_messages(self):
-        """
-        Manages the service lifecycle and reconnect loop.
-        """
+        """ Manages the service lifecycle and reconnect loop. """
         self._is_running.set()
-        log.info(
-            f"[{self.exchange_name}] Starting message processor for '{self.market_def.market_id}'."
-        )
+        log.info(f"[{self.exchange_name}] Starting message processor for '{self.market_def.market_id}'.")
 
         listener_task = asyncio.create_task(self._control_channel_listener())
         reconnect_attempts = 0
@@ -255,50 +198,34 @@ class BinanceWsClient(AbstractWsClient):
                     if not self._is_running.is_set():
                         break
                     reconnect_attempts = 0
-
-                    await self.market_data_repo.cache_ticker(
-                        message.data["symbol"], message.data
-                    )
+                    
+                    # Caching logic remains unchanged
+                    await self.market_data_repo.cache_ticker(message.data["symbol"], message.data)
 
                     batch.append(message)
                     if len(batch) >= 100:
-                        await self.market_data_repo.add_messages_to_stream(
-                            self.stream_name, batch
-                        )
+                        await self.market_data_repo.add_messages_to_stream(self.stream_name, list(batch))
                         batch.clear()
 
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                log.error(
-                    f"[{self.exchange_name}] Unhandled error in processor for '{self.market_def.market_id}': {e}",
-                    exc_info=True,
-                )
+                log.error(f"[{self.exchange_name}] Unhandled error in processor for '{self.market_def.market_id}': {e}", exc_info=True)
             finally:
                 if self._is_running.is_set():
                     reconnect_attempts += 1
                     delay = min(2**reconnect_attempts, 60)
-                    log.info(
-                        f"[{self.exchange_name}] Message stream for '{self.market_def.market_id}' ended. Reconnecting in {delay}s..."
-                    )
+                    log.info(f"[{self.exchange_name}] Message stream for '{self.market_def.market_id}' ended. Reconnecting in {delay}s...")
                     await asyncio.sleep(delay)
 
         listener_task.cancel()
         await asyncio.gather(listener_task, return_exceptions=True)
-        log.info(
-            f"[{self.exchange_name}] Message processor for '{self.market_def.market_id}' shut down."
-        )
+        log.info(f"[{self.exchange_name}] Message processor for '{self.market_def.market_id}' shut down.")
 
     async def close(self):
-        """
-        Gracefully shuts down the websocket client.
-        """
-        log.info(
-            f"[{self.exchange_name}] Closing client for '{self.market_def.market_id}'..."
-        )
+        """ Gracefully shuts down the websocket client. """
+        log.info(f"[{self.exchange_name}] Closing client for '{self.market_def.market_id}'...")
         self._is_running.clear()
         if self._ws and self._ws.open:
             await self._ws.close()
-        log.info(
-            f"[{self.exchange_name}] Client for '{self.market_def.market_id}' closed."
-        )
+        log.info(f"[{self.exchange_name}] Client for '{self.market_def.market_id}' closed.")
