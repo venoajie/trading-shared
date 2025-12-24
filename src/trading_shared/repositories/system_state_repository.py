@@ -20,8 +20,8 @@ class SystemStateRepository:
     This includes target sets for services, global flags, and other cross-service data.
     """
 
-    # Define keys as constants to prevent magic strings and ensure consistency
-    ANALYZER_TARGETS_KEY = "system:universe:analyzer_targets"
+    #Obsolete constant.
+    #ANALYZER_TARGETS_KEY = "system:universe:analyzer_targets"
 
     def __init__(self, redis_client: CustomRedisClient):
         self.redis = redis_client
@@ -68,7 +68,7 @@ class SystemStateRepository:
             return []
 
 
-    async def publish_analyzer_targets(self, symbols: List[str]):
+    async def publish_analyzer_targets_deprecated(self, symbols: List[str]):
         """
         Atomically overwrites the set of symbols for the Analyzer service to track.
 
