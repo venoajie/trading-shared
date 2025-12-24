@@ -14,6 +14,7 @@ from trading_shared.clients.redis_client import CustomRedisClient
 UNIVERSE_STATE_KEY = "system:universe:active_set"
 UNIVERSE_STATE_TTL_SECONDS = 300  # 5 minutes
 
+
 class SystemStateRepository:
     """
     Manages the reading and writing of system-level state and coordination keys in Redis.
@@ -27,14 +28,18 @@ class SystemStateRepository:
         """
         Sets the canonical list of active instruments in the trading universe.
         This writes the state to a durable Redis key for polling by consumers.
-        
+
         Args:
             symbols: A list of instrument symbol strings.
         """
         try:
             payload = orjson.dumps(symbols)
-            await self.redis.set(UNIVERSE_STATE_KEY, payload, ex=UNIVERSE_STATE_TTL_SECONDS)
-            log.debug(f"Set canonical universe state key '{UNIVERSE_STATE_KEY}' with {len(symbols)} symbols.")
+            await self.redis.set(
+                UNIVERSE_STATE_KEY, payload, ex=UNIVERSE_STATE_TTL_SECONDS
+            )
+            log.debug(
+                f"Set canonical universe state key '{UNIVERSE_STATE_KEY}' with {len(symbols)} symbols."
+            )
         except Exception:
             log.exception(
                 f"Failed to set active universe state in Redis key '{UNIVERSE_STATE_KEY}'."
@@ -44,7 +49,7 @@ class SystemStateRepository:
         """
         Gets the canonical list of active instruments from the trading universe state key.
         This allows services to poll for the current state in a decoupled manner.
-        
+
         Returns:
             A list of instrument symbol strings, or an empty list if the state
             is not set or an error occurs.
@@ -52,9 +57,11 @@ class SystemStateRepository:
         try:
             payload = await self.redis.get(UNIVERSE_STATE_KEY)
             if not payload:
-                log.warning(f"Universe state key '{UNIVERSE_STATE_KEY}' not found or is empty.")
+                log.warning(
+                    f"Universe state key '{UNIVERSE_STATE_KEY}' not found or is empty."
+                )
                 return []
-            
+
             return orjson.loads(payload)
         except Exception:
             log.exception(
