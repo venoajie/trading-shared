@@ -1,3 +1,4 @@
+
 # src/trading_shared/clients/redis_client.py
 
 # --- Built Ins  ---
@@ -291,16 +292,31 @@ class CustomRedisClient:
                 # Re-raise to signal that the write operation ultimately failed.
                 raise
 
+    # --- START: REMEDIATION FOR FLAW 1 ---
     async def xadd_to_dlq(
         self,
         original_stream_name: str,
         failed_messages: list[dict],
     ):
+        """
+        Moves failed messages to a dead-letter queue with a name derived from the
+        original stream, compliant with DATA_CONTRACTS.md v2.0.
+        """
         if not failed_messages:
             return
-        dlq_stream_name = f"dlq:{original_stream_name}"
-        try:
 
+        # Correctly construct the DLQ name, e.g., 'market:stream:...' -> 'deadletter:queue:market:stream'
+        parts = original_stream_name.split(":", 2)
+        if len(parts) >= 2:
+            domain, type_ = parts[0], parts[1]
+            dlq_stream_name = f"deadletter:queue:{domain}:{type_}"
+        else:
+            log.error(
+                f"Could not parse domain/type from '{original_stream_name}'. Using fallback DLQ."
+            )
+            dlq_stream_name = f"deadletter:queue:malformed:{original_stream_name}"
+
+        try:
             async def command(pool: aioredis.Redis):
                 pipe = pool.pipeline()
                 for msg in failed_messages:
@@ -309,15 +325,16 @@ class CustomRedisClient:
                     )
                 await pipe.execute()
 
-            await self.execute_resiliently(command, "pipeline.execute(xadd_dlq)")
+            await self.execute_resiliently(command, f"pipeline.execute(xadd_dlq to {dlq_stream_name})")
             log.warning(
-                f"{len(failed_messages)} message(s) moved to DLQ stream "
-                f"'{dlq_stream_name}'"
+                f"{len(failed_messages)} message(s) moved to DLQ stream '{dlq_stream_name}' from '{original_stream_name}'"
             )
         except Exception as e:
             log.critical(
                 f"CRITICAL: Failed to write to DLQ stream '{dlq_stream_name}': {e}"
             )
+    # --- END: REMEDIATION FOR FLAW 1 ---
+
 
     async def ensure_consumer_group(
         self,
@@ -416,23 +433,20 @@ class CustomRedisClient:
             log.error(f"An unexpected error occurred during XAUTOCLAIM: {e}")
             raise
 
+    # --- START: REMEDIATION FOR FLAW 2 ---
     async def get_system_state(self) -> str:
-        try:
-            state = await self.execute_resiliently(
-                lambda pool: pool.get("system:state:simple"), "get"
-            )
-            if state:
-                return state.decode()
-            old_state = await self.execute_resiliently(
-                lambda pool: pool.get("system:state"), "get"
-            )
-            return old_state.decode() if old_state else "LOCKED"
-        except ConnectionError:
-            log.warning(
-                "Could not get system state due to Redis connection error. "
-                "Defaulting to LOCKED."
-            )
-            return "LOCKED"
+        """
+        DEPRECATED: This method accesses obsolete keys and violates the centralized
+        state management protocol defined in DATA_CONTRACTS.md v2.0.
+        
+        ARCHITECTURAL MANDATE: Services must receive a state manager repository via
+        dependency injection. Direct state access via this client is forbidden.
+        """
+        raise NotImplementedError(
+            "get_system_state is deprecated. Use a dedicated SystemStateManager "
+            "to ensure compliance with the hierarchical state protocol."
+        )
+    # --- END: REMEDIATION FOR FLAW 2 ---
 
     async def set_system_state(
         self,
@@ -447,6 +461,8 @@ class CustomRedisClient:
                     "reason": reason or "",
                     "timestamp": time.time(),
                 }
+                # This logic should also be migrated to a state manager.
+                # It writes to a deprecated key "system:state".
                 await pool.hset("system:state", mapping=state_data)
                 await pool.set("system:state:simple", state)
 
@@ -469,8 +485,6 @@ class CustomRedisClient:
         """
         Returns a pipeline object from the underlying client, allowing for atomic transactions.
         """
-        # Pipeline creation itself doesn't need resilience, as it's a local object.
-        # The resilience is applied when pipe.execute() is called.
         client = await self._get_client()
         return client.pipeline(transaction=transaction)
 
@@ -486,7 +500,6 @@ class CustomRedisClient:
         message: str | bytes,
     ):
         """Publishes a message to a channel."""
-
         async def command(conn: aioredis.Redis):
             return await conn.publish(channel, message)
 
@@ -518,7 +531,6 @@ class CustomRedisClient:
         name: str,
     ) -> dict[bytes, bytes]:
         """Returns all fields and values of the hash stored at key."""
-
         async def command(conn: aioredis.Redis):
             return await conn.hgetall(name)
 
@@ -536,13 +548,11 @@ class CustomRedisClient:
         or a mapping of multiple key/value pairs.
         """
         if mapping is not None:
-            # Multi-field update
             async def command(conn: aioredis.Redis):
                 await conn.hset(name, mapping=mapping)
 
             await self.execute_resiliently(command, f"HSET {name} [MAPPING]")
         elif key is not None:
-            # Single-field update
             async def command(conn: aioredis.Redis):
                 await conn.hset(name, key, value)
 
@@ -558,7 +568,6 @@ class CustomRedisClient:
         """
         Sets a timeout on a key.
         """
-
         async def command(conn: aioredis.Redis):
             return await conn.expire(name, time)
 
@@ -577,7 +586,6 @@ class CustomRedisClient:
             else v
             for k, v in fields.items()
         }
-
         async def command(conn: aioredis.Redis):
             await conn.xadd(
                 name, encoded_fields, maxlen=maxlen, approximate=approximate
@@ -615,7 +623,7 @@ class CustomRedisClient:
         try:
             client = await self._get_client()
             result = await client.ping()
-            return result == b"PONG" or result == True
+            return result == b"PONG" or result is True
         except Exception as e:
             log.warning(f"Redis ping failed: {e}")
             raise ConnectionError(f"Redis ping failed: {e}")
@@ -637,6 +645,7 @@ class CustomRedisClient:
 
     async def reconnect(self) -> bool:
         """
+
         Forces a reconnection to Redis.
         Returns True if reconnection succeeded, False otherwise.
         """
