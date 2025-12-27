@@ -13,7 +13,7 @@ import websockets
 from loguru import logger as log
 
 # --- Local Application Imports ---
-from ...clients.redis_client import CustomRedisClient  # FIX: Import the correct client class
+from ...clients.redis_client import CustomRedisClient
 from ...config.models import ExchangeSettings
 from ...repositories.instrument_repository import InstrumentRepository
 from ...repositories.market_data_repository import MarketDataRepository
@@ -38,7 +38,7 @@ class BinanceWsClient(AbstractWsClient):
         system_state_repo: SystemStateRepository,
         stream_name: str,
         universe_state_key: str,
-        redis_client: CustomRedisClient,  # FIX: Corrected type hint
+        redis_client: CustomRedisClient,
         settings: ExchangeSettings,
         shard_id: int,
         total_shards: int,
@@ -66,6 +66,11 @@ class BinanceWsClient(AbstractWsClient):
         """
         my_targets = set()
         for i, symbol in enumerate(sorted(universe)):
+            # FIX: Add defensive filter to exclude leveraged tokens, which do not have @trade streams.
+            # This prevents the 1008 Policy Violation error.
+            if "UP" in symbol or "DOWN" in symbol:
+                continue
+
             if i % self.total_shards == self.shard_id:
                 my_targets.add(f"{symbol.lower()}@trade")
         return my_targets
@@ -150,15 +155,18 @@ class BinanceWsClient(AbstractWsClient):
         self._is_running.set()
         reconnect_attempts = 0
         while self._is_running.is_set():
-            subscription_task = asyncio.create_task(self._maintain_subscriptions())
-            message_task = asyncio.create_task(self._process_message_batch())
-
-            done, pending = await asyncio.wait(
-                {subscription_task, message_task}, return_when=asyncio.FIRST_COMPLETED
-            )
-
-            for task in pending:
-                task.cancel()
+            try:
+                # FIX: Use asyncio.gather to properly propagate exceptions from tasks.
+                subscription_task = asyncio.create_task(self._maintain_subscriptions())
+                message_task = asyncio.create_task(self._process_message_batch())
+                await asyncio.gather(subscription_task, message_task)
+            except websockets.exceptions.ConnectionClosedError as e:
+                log.warning(f"[{self.market_def.market_id}] Connection closed with error: {e.code} {e.reason}")
+            except asyncio.CancelledError:
+                log.info(f"[{self.market_def.market_id}] Supervisor tasks cancelled.")
+                break # Exit the loop cleanly on cancellation
+            except Exception as e:
+                log.error(f"[{self.market_def.market_id}] Unhandled exception in supervisor: {e}", exc_info=True)
 
             if self._is_running.is_set():
                 reconnect_attempts += 1

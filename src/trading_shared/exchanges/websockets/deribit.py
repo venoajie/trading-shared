@@ -13,7 +13,7 @@ import websockets
 from loguru import logger as log
 
 # --- Local Application Imports ---
-from ...clients.redis_client import CustomRedisClient  # FIX: Import the correct client class
+from ...clients.redis_client import CustomRedisClient
 from ...config.models import ExchangeSettings
 from ...repositories.instrument_repository import InstrumentRepository
 from ...repositories.market_data_repository import MarketDataRepository
@@ -38,7 +38,7 @@ class DeribitWsClient(AbstractWsClient):
         system_state_repo: SystemStateRepository,
         stream_name: str,
         universe_state_key: str,
-        redis_client: CustomRedisClient,  # FIX: Corrected type hint
+        redis_client: CustomRedisClient,
         settings: ExchangeSettings,
         shard_id: int = 0,
         total_shards: int = 1,
@@ -147,15 +147,19 @@ class DeribitWsClient(AbstractWsClient):
         self._is_running.set()
         reconnect_attempts = 0
         while self._is_running.is_set():
-            subscription_task = asyncio.create_task(self._maintain_subscriptions())
-            message_task = asyncio.create_task(self._process_message_batch())
+            try:
+                # Use asyncio.gather to properly propagate exceptions from tasks.
+                subscription_task = asyncio.create_task(self._maintain_subscriptions())
+                message_task = asyncio.create_task(self._process_message_batch())
+                await asyncio.gather(subscription_task, message_task)
+            except websockets.exceptions.ConnectionClosedError as e:
+                log.warning(f"[{self.exchange_name}] Connection closed with error: {e.code} {e.reason}")
+            except asyncio.CancelledError:
+                log.info(f"[{self.exchange_name}] Supervisor tasks cancelled.")
+                break # Exit the loop cleanly on cancellation
+            except Exception as e:
+                log.error(f"[{self.exchange_name}] Unhandled exception in supervisor: {e}", exc_info=True)
 
-            done, pending = await asyncio.wait(
-                {subscription_task, message_task}, return_when=asyncio.FIRST_COMPLETED
-            )
-
-            for task in pending:
-                task.cancel()
 
             if self._is_running.is_set():
                 reconnect_attempts += 1
