@@ -23,9 +23,6 @@ from .base import AbstractWsClient
 # --- Shared Library Imports  ---
 from trading_engine_core.models import StreamMessage, MarketDefinition
 
-# [REFACTOR] Removed the hardcoded, non-compliant constant.
-# EXCHANGE_EVENTS_STREAM = "stream:exchange_events:deribit"
-
 
 class DeribitWsClient(AbstractWsClient):
     def __init__(
