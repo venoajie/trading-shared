@@ -1,17 +1,23 @@
 # src/trading_shared/exchanges/websockets/base.py
 
+# --- Built Ins ---
 from abc import ABC, abstractmethod
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
-# --- Shared Library Imports ---
-from trading_engine_core.models import MarketDefinition, StreamMessage
+# --- Local Application Imports ---
 from ...clients.redis_client import CustomRedisClient
 from ...repositories.instrument_repository import InstrumentRepository
 from ...repositories.market_data_repository import MarketDataRepository
 
+# --- Shared Library Imports  ---
+from trading_engine_core.models import StreamMessage, MarketDefinition
+
 
 class AbstractWsClient(ABC):
-    """An abstract base class for exchange WebSocket clients."""
+    """
+    Abstract base class for exchange-specific WebSocket clients.
+    It defines the core interface for connecting, processing messages, and closing.
+    """
 
     def __init__(
         self,
@@ -19,28 +25,41 @@ class AbstractWsClient(ABC):
         market_data_repo: MarketDataRepository,
         instrument_repo: InstrumentRepository,
         redis_client: Optional[CustomRedisClient] = None,
+        stream_name: str | None = None,
     ):
+        """
+        Initializes the base client.
+
+        Args:
+            market_definition: The market definition for this client.
+            market_data_repo: Repository for persisting market data.
+            instrument_repo: Repository for instrument lookups.
+            redis_client: An optional Redis client, required for private scopes.
+            stream_name: The mandatory Redis stream to publish data to.
+        """
         self.market_def = market_definition
-        self.exchange_name = market_definition.exchange
+        self.exchange_name = self.market_def.exchange
         self.market_data_repo = market_data_repo
         self.instrument_repo = instrument_repo
         self.redis_client = redis_client
 
-        # Unified stream name. All exchanges will write to this single key.
-        # This aligns with the Distributor's configuration.
-        self.stream_name = "stream:market_data"
+        if not stream_name:
+            raise ValueError(
+                f"[{self.exchange_name}] 'stream_name' must be provided to the WebSocket client constructor."
+            )
+        self.stream_name = stream_name
 
     @abstractmethod
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
-        """Connects, authenticates, subscribes, and yields canonical StreamMessage objects."""
-        yield  # This makes the method an async generator
+        """Connects to the WebSocket and yields processed messages."""
+        yield
 
     @abstractmethod
     async def process_messages(self):
-        """A generic processor that consumes from connect() and pushes to a data stream."""
-        raise NotImplementedError
+        """The main run loop for the client to process messages."""
+        pass
 
     @abstractmethod
     async def close(self):
-        """Gracefully closes the connection and cleans up resources."""
-        raise NotImplementedError
+        """Gracefully closes the WebSocket connection."""
+        pass

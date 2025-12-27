@@ -1,3 +1,4 @@
+
 # --- Built Ins  ---
 import asyncio
 import json
@@ -22,7 +23,8 @@ from .base import AbstractWsClient
 # --- Shared Library Imports  ---
 from trading_engine_core.models import StreamMessage, MarketDefinition
 
-EXCHANGE_EVENTS_STREAM = "stream:exchange_events:deribit"
+# [REFACTOR] Removed the hardcoded, non-compliant constant.
+# EXCHANGE_EVENTS_STREAM = "stream:exchange_events:deribit"
 
 
 class DeribitWsClient(AbstractWsClient):
@@ -32,13 +34,20 @@ class DeribitWsClient(AbstractWsClient):
         instrument_repo: InstrumentRepository,
         market_data_repo: MarketDataRepository,
         settings: ExchangeSettings,
+        # [REFACTOR] Add 'stream_name' to the constructor signature.
+        stream_name: str,
         subscription_scope: str = "public",
         redis_client: Optional[CustomRedisClient] = None,
         instruments_to_subscribe: List[Dict[str, Any]] | None = None,
         **kwargs,
     ):
+        # [REFACTOR] Pass the new 'stream_name' parameter to the base class constructor.
         super().__init__(
-            market_definition, market_data_repo, instrument_repo, redis_client
+            market_definition,
+            market_data_repo,
+            instrument_repo,
+            redis_client,
+            stream_name=stream_name,
         )
         self.settings = settings
         self.subscription_scope = subscription_scope.lower()
@@ -51,12 +60,9 @@ class DeribitWsClient(AbstractWsClient):
         if not self.settings.client_id or not self.settings.client_secret:
             raise ValueError("Deribit client_id and client_secret must be configured.")
 
-        if self.subscription_scope == "public":
-            self.stream_name = f"stream:market_data:{self.exchange_name}"
-        elif self.subscription_scope == "private":
-            self.stream_name = EXCHANGE_EVENTS_STREAM
-        else:
-            raise ValueError(f"Invalid subscription_scope: '{self.subscription_scope}'")
+        # [REFACTOR] DELETED the conditional logic that assigned hardcoded stream names.
+        # The 'self.stream_name' is now correctly inherited from the base class,
+        # which receives its value from this constructor.
 
         self._is_running = asyncio.Event()
         self.ws_connection_url = self.market_def.ws_base_url
@@ -92,7 +98,6 @@ class DeribitWsClient(AbstractWsClient):
                 f"[{self.exchange_name}] Building public subscriptions for {len(self.instruments_to_subscribe)} instruments."
             )
             for instrument in self.instruments_to_subscribe:
-                # Assuming 'instrument_name' is the key from the database record
                 channels.append(f"trades.{instrument['instrument_name']}.raw")
 
         elif self.subscription_scope == "private":
@@ -156,15 +161,12 @@ class DeribitWsClient(AbstractWsClient):
             )
 
             is_authenticated = self.subscription_scope != "private"
-            has_subscribed = False
-
+            
             if not is_authenticated:
                 await self._send_json(auth_msg)
 
-            # For public scope, subscribe immediately after connecting
             if self.subscription_scope == "public":
                 await self._subscribe()
-                has_subscribed = True
 
             async for message in ws:
                 try:
@@ -184,7 +186,6 @@ class DeribitWsClient(AbstractWsClient):
                             )
                             is_authenticated = True
                             await self._subscribe()
-                            has_subscribed = True
                         continue
 
                     if self._handle_control_message(data):

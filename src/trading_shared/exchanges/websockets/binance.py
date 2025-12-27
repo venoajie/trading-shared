@@ -36,11 +36,18 @@ class BinanceWsClient(AbstractWsClient):
         market_data_repo: MarketDataRepository,
         settings: ExchangeSettings,
         instruments_to_subscribe: List[Dict[str, Any]],
+        # [REFACTOR] Add 'stream_name' to the constructor signature.
+        stream_name: str,
         market_id_suffix: str = "",
         control_channel: str | None = None,
     ):
+        # [REFACTOR] Pass the new 'stream_name' parameter to the base class constructor.
         super().__init__(
-            market_definition, market_data_repo, instrument_repo, redis_client
+            market_definition,
+            market_data_repo,
+            instrument_repo,
+            redis_client,
+            stream_name=stream_name,
         )
         if market_id_suffix:
             self.market_def.market_id = (
@@ -56,7 +63,6 @@ class BinanceWsClient(AbstractWsClient):
         self._ws: websockets.WebSocketClientProtocol | None = None
         self._is_running = asyncio.Event()
 
-        # [CORRECTION] Make control_channel a public attribute to define a clear interface.
         if control_channel:
             self.control_channel = control_channel
         else:
@@ -68,10 +74,8 @@ class BinanceWsClient(AbstractWsClient):
             raise ValueError("Binance subscription control channel not configured.")
 
     async def _send_subscription_request(self, method: str, params: list):
-        # [CORRECTION] Add a robust type guard to prevent crashes from state pollution.
         if not isinstance(self._ws, websockets.WebSocketClientProtocol) or not self._ws.open:
             if self._ws is not None:
-                # This log is critical for diagnosing the root cause.
                 log.critical(
                     f"[{self.market_def.market_id}] State pollution detected! "
                     f"_ws attribute is of type '{type(self._ws).__name__}' instead of 'WebSocketClientProtocol'. "
@@ -87,9 +91,6 @@ class BinanceWsClient(AbstractWsClient):
         await self._ws.send(orjson.dumps(payload))
 
     async def _control_channel_listener(self):
-        """
-        Listens for universe state updates and calculates subscription deltas.
-        """
         log.info(f"[{self.market_def.market_id}] Listening for commands on '{self.control_channel}'")
 
         while self._is_running.is_set():
