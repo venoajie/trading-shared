@@ -13,6 +13,7 @@ import websockets
 from loguru import logger as log
 
 # --- Local Application Imports ---
+from ...clients.redis_client import CustomRedisClient  # FIX: Import the correct client class
 from ...config.models import ExchangeSettings
 from ...repositories.instrument_repository import InstrumentRepository
 from ...repositories.market_data_repository import MarketDataRepository
@@ -37,12 +38,11 @@ class BinanceWsClient(AbstractWsClient):
         system_state_repo: SystemStateRepository,
         stream_name: str,
         universe_state_key: str,
-        redis_client: websockets.RedisClient,
+        redis_client: CustomRedisClient,  # FIX: Corrected type hint
         settings: ExchangeSettings,
         shard_id: int,
         total_shards: int,
     ):
-        # FIX: Explicitly pass parent arguments to super().__init__
         super().__init__(
             market_definition=market_definition,
             market_data_repo=market_data_repo,
@@ -54,7 +54,6 @@ class BinanceWsClient(AbstractWsClient):
             shard_id=shard_id,
             total_shards=total_shards,
         )
-        # Store child-specific dependencies
         self.settings = settings
         self.ws_connection_url = self.market_def.ws_base_url
         self._ws: websockets.WebSocketClientProtocol | None = None
@@ -66,10 +65,8 @@ class BinanceWsClient(AbstractWsClient):
         maps the symbols to Binance's required channel name format.
         """
         my_targets = set()
-        # Sort for deterministic, stable sharding across all instances
         for i, symbol in enumerate(sorted(universe)):
             if i % self.total_shards == self.shard_id:
-                # Map canonical symbol "BTCUSDT" to Binance stream name "btcusdt@trade"
                 my_targets.add(f"{symbol.lower()}@trade")
         return my_targets
 
@@ -98,7 +95,6 @@ class BinanceWsClient(AbstractWsClient):
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
         """
         Manages the raw WebSocket connection lifecycle and yields parsed messages.
-        This is the inner data pump for the supervisor.
         """
         try:
             async with websockets.connect(self.ws_connection_url, ping_interval=20, ping_timeout=60) as ws:

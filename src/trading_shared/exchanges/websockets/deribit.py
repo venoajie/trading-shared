@@ -13,6 +13,7 @@ import websockets
 from loguru import logger as log
 
 # --- Local Application Imports ---
+from ...clients.redis_client import CustomRedisClient  # FIX: Import the correct client class
 from ...config.models import ExchangeSettings
 from ...repositories.instrument_repository import InstrumentRepository
 from ...repositories.market_data_repository import MarketDataRepository
@@ -37,12 +38,11 @@ class DeribitWsClient(AbstractWsClient):
         system_state_repo: SystemStateRepository,
         stream_name: str,
         universe_state_key: str,
-        redis_client: websockets.RedisClient,
+        redis_client: CustomRedisClient,  # FIX: Corrected type hint
         settings: ExchangeSettings,
         shard_id: int = 0,
         total_shards: int = 1,
     ):
-        # FIX: Explicitly pass parent arguments to super().__init__
         super().__init__(
             market_definition=market_definition,
             market_data_repo=market_data_repo,
@@ -54,7 +54,6 @@ class DeribitWsClient(AbstractWsClient):
             shard_id=shard_id,
             total_shards=total_shards,
         )
-        # Store child-specific dependencies
         self.settings = settings
         self.ws_connection_url = self.market_def.ws_base_url
         self._ws: websockets.WebSocketClientProtocol | None = None
