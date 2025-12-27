@@ -1,4 +1,3 @@
-
 # src/trading_shared/exchanges/websockets/binance.py
 
 # --- Built Ins  ---
@@ -36,12 +35,10 @@ class BinanceWsClient(AbstractWsClient):
         market_data_repo: MarketDataRepository,
         settings: ExchangeSettings,
         instruments_to_subscribe: List[Dict[str, Any]],
-        # [REFACTOR] Add 'stream_name' to the constructor signature.
         stream_name: str,
         market_id_suffix: str = "",
         control_channel: str | None = None,
     ):
-        # [REFACTOR] Pass the new 'stream_name' parameter to the base class constructor.
         super().__init__(
             market_definition,
             market_data_repo,
@@ -49,11 +46,11 @@ class BinanceWsClient(AbstractWsClient):
             redis_client,
             stream_name=stream_name,
         )
-        if market_id_suffix:
+        self.market_id_suffix = market_id_suffix
+        if self.market_id_suffix:
             self.market_def.market_id = (
-                f"{self.market_def.market_id}_{market_id_suffix}"
+                f"{self.market_def.market_id}_{self.market_id_suffix}"
             )
-
         self.ws_connection_url = self.market_def.ws_base_url
         self.instruments_to_subscribe = instruments_to_subscribe
         self._subscriptions: Set[str] = {
@@ -63,27 +60,26 @@ class BinanceWsClient(AbstractWsClient):
         self._ws: websockets.WebSocketClientProtocol | None = None
         self._is_running = asyncio.Event()
 
-        if control_channel:
-            self.control_channel = control_channel
-        else:
-            self.control_channel = f"control:{self.market_def.market_id}:subscriptions"
-
-        self.settings = settings
-        self.redis_client = redis_client
+        # Introduce an asyncio.Event to manage and signal connection state.
+        self._connected = asyncio.Event()
+        
+        self.control_channel = control_channel
         if not self.control_channel:
             raise ValueError("Binance subscription control channel not configured.")
-
+        
     async def _send_subscription_request(self, method: str, params: list):
-        if not isinstance(self._ws, websockets.WebSocketClientProtocol) or not self._ws.open:
-            if self._ws is not None:
-                log.critical(
-                    f"[{self.market_def.market_id}] State pollution detected! "
-                    f"_ws attribute is of type '{type(self._ws).__name__}' instead of 'WebSocketClientProtocol'. "
-                    f"Value: {self._ws}. Cannot send subscription request."
-                )
-            else:
-                log.warning(f"[{self.market_def.market_id}] WebSocket is not connected. Cannot send '{method}' request.")
+        await self._connected.wait()
+        
+        if not self._ws or not self._ws.open:
+            log.warning(f"[{self.market_def.market_id}] WebSocket is not connected. Cannot send '{method}' request.")
             return
+
+        # An empty params list is a valid way to unsubscribe from all streams.
+        if not params and method == "SUBSCRIBE":
+             log.warning(f"[{self.market_def.market_id}] Received empty subscription list. Unsubscribing from all streams.")
+             method = "UNSUBSCRIBE"
+             params = list(self._subscriptions) # Unsubscribe from what we currently have
+             if not params: return # Nothing to do
 
         request_id = int(asyncio.get_running_loop().time() * 1000)
         payload = {"method": method.upper(), "params": params, "id": request_id}
@@ -98,56 +94,49 @@ class BinanceWsClient(AbstractWsClient):
                 async with self.redis_client.pubsub() as pubsub:
                     await pubsub.subscribe(self.control_channel)
                     while self._is_running.is_set():
+                        message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                        if not message: continue
+
                         try:
-                            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
-                            if not message:
+                            command = orjson.loads(message["data"])
+
+                            if command.get("chunk_id") != self.market_id_suffix:
                                 continue
 
-                            log.info(f"[{self.market_def.market_id}] Received new universe state on control channel.")
-                            full_universe_symbols: List[str] = orjson.loads(message["data"])
+                            log.info(f"[{self.market_def.market_id}] Received targeted command.")
+                            target_streams = set(command.get("streams", []))
 
-                            num_clients = 5
-                            client_index = int(self.market_def.market_id.split('_')[-1]) - 1
-                            
-                            chunk_symbols = sorted(full_universe_symbols)[client_index::num_clients]
-                            
-                            target_streams = {f"{symbol.lower()}@trade" for symbol in chunk_symbols}
+                            # Do not calculate a diff. The command represents the desired state.
+                            # A single SUBSCRIBE call to the Binance API with the new list will
+                            # automatically handle unsubscribing from old streams and subscribing to new ones.
+                            if target_streams == self._subscriptions:
+                                continue # No change needed
 
-                            streams_to_add = list(target_streams - self._subscriptions)
-                            streams_to_remove = list(self._subscriptions - target_streams)
-
-                            if not streams_to_add and not streams_to_remove:
-                                continue
-
-                            if streams_to_remove:
-                                await self._send_subscription_request("UNSUBSCRIBE", streams_to_remove)
-                            
-                            if streams_to_add:
-                                await self._send_subscription_request("SUBSCRIBE", streams_to_add)
+                            await self._send_subscription_request("SUBSCRIBE", list(target_streams))
 
                             self._subscriptions = target_streams
-                            log.success(f"[{self.market_def.market_id}] Subscriptions updated: {len(streams_to_add)} added, {len(streams_to_remove)} removed.")
+                            log.success(f"[{self.market_def.market_id}] Subscription state set to {len(target_streams)} streams.")
 
                         except (orjson.JSONDecodeError, KeyError, TypeError) as e:
                             log.warning(f"[{self.market_def.market_id}] Invalid command received: {e}")
-                        except (ConnectionError, OSError) as e:
-                            log.warning(f"[{self.market_def.market_id}] Control channel connection lost: {e}. Reconnecting...")
-                            break
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 log.error(f"[{self.market_def.market_id}] Unexpected error in control channel listener: {e}", exc_info=True)
                 await asyncio.sleep(5)
-
+                
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
         url = f"{self.ws_connection_url}"
-
         try:
             log.info(f"[{self.exchange_name}] Connecting to: {url}")
             async with websockets.connect(url, ping_interval=20, ping_timeout=60) as ws:
                 self._ws = ws
                 log.success(f"[{self.exchange_name}] WebSocket connection established for '{self.market_def.market_id}'.")
+                
+                # Set the event to signal that the connection is live and ready.
+                self._connected.set()
 
+                # Resubscribe to current state on reconnect
                 if self._subscriptions:
                     await self._send_subscription_request("SUBSCRIBE", list(self._subscriptions))
 
@@ -177,8 +166,10 @@ class BinanceWsClient(AbstractWsClient):
                         log.error(f"[{self.exchange_name}] Error processing message: {e}. Payload: {message}", exc_info=True)
         finally:
             self._ws = None
+            # Clear the event to signal that the connection is down.
+            self._connected.clear()
             log.warning(f"[{self.exchange_name}] Disconnected from {url}.")
-
+            
     async def process_messages(self):
         self._is_running.set()
         log.info(f"[{self.exchange_name}] Starting message processor for '{self.market_def.market_id}'.")
