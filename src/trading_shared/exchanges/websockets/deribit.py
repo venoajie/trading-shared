@@ -1,276 +1,149 @@
-# --- Built Ins  ---
+
+# src/trading_shared/exchanges/websockets/deribit.py
+
+# --- Built Ins ---
 import asyncio
-import json
 import random
 import time
 from collections import deque
-from typing import Any, AsyncGenerator, Dict, List, Optional, Union
+from typing import AsyncGenerator, Dict, List, Optional, Set
 
-# --- Installed  ---
-from loguru import logger as log
+# --- Installed ---
 import orjson
 import websockets
-from pydantic import SecretStr
+from loguru import logger as log
 
 # --- Local Application Imports ---
-from ...clients.redis_client import CustomRedisClient
-from ...config.models import ExchangeSettings
-from ...repositories.instrument_repository import InstrumentRepository
-from ...repositories.market_data_repository import MarketDataRepository
 from .base import AbstractWsClient
 
-# --- Shared Library Imports  ---
-from trading_engine_core.models import StreamMessage, MarketDefinition
+# --- Shared Library Imports ---
+from trading_engine_core.models import StreamMessage
 
 
 class DeribitWsClient(AbstractWsClient):
-    def __init__(
-        self,
-        market_definition: MarketDefinition,
-        instrument_repo: InstrumentRepository,
-        market_data_repo: MarketDataRepository,
-        settings: ExchangeSettings,
-        # [REFACTOR] Add 'stream_name' to the constructor signature.
-        stream_name: str,
-        subscription_scope: str = "public",
-        redis_client: Optional[CustomRedisClient] = None,
-        instruments_to_subscribe: List[Dict[str, Any]] | None = None,
-        **kwargs,
-    ):
-        # [REFACTOR] Pass the new 'stream_name' parameter to the base class constructor.
-        super().__init__(
-            market_definition,
-            market_data_repo,
-            instrument_repo,
-            redis_client,
-            stream_name=stream_name,
-        )
-        self.settings = settings
-        self.subscription_scope = subscription_scope.lower()
-        self.instruments_to_subscribe = instruments_to_subscribe or []
+    """
+    A self-managing, dynamic WebSocket client for Deribit. It maps canonical
+    symbols to Deribit's format and maintains its own subscriptions.
+    """
 
-        if self.subscription_scope == "private" and not self.redis_client:
-            raise ValueError(
-                "DeribitWsClient in 'private' scope requires a redis_client."
-            )
-        if not self.settings.client_id or not self.settings.client_secret:
-            raise ValueError("Deribit client_id and client_secret must be configured.")
-
-        # [REFACTOR] DELETED the conditional logic that assigned hardcoded stream names.
-        # The 'self.stream_name' is now correctly inherited from the base class,
-        # which receives its value from this constructor.
-
-        self._is_running = asyncio.Event()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         self.ws_connection_url = self.market_def.ws_base_url
-        if not self.ws_connection_url:
-            raise ValueError("Deribit ws_base_url not configured in MarketDefinition.")
+        self._ws: websockets.WebSocketClientProtocol | None = None
+        self._connected = asyncio.Event()
 
-        self._client_id: Union[SecretStr, str] = self.settings.client_id
-        self._client_secret: Union[SecretStr, str] = self.settings.client_secret
-        self.websocket_client: Optional[websockets.WebSocketClientProtocol] = None
+    def _get_channels_from_universe(self, universe: List[str]) -> Set[str]:
+        """
+        Maps canonical universe symbols to Deribit's required channel name format.
+        This is a critical anti-corruption layer.
+        """
+        my_targets = set()
+        for symbol in universe:
+            # This mapping is an example and must be maintained as the universe expands.
+            if symbol == "BTCUSDT":
+                my_targets.add("trades.BTC-PERPETUAL.raw")
+            elif symbol == "ETHUSDT":
+                my_targets.add("trades.ETH-PERPETUAL.raw")
+            # All other symbols in the universe are ignored by this client.
+        return my_targets
 
-    def _get_secret_value(self, secret: Union[SecretStr, str]) -> str:
-        """Safely gets the string value from a SecretStr or a plain str."""
-        if isinstance(secret, SecretStr):
-            return secret.get_secret_value()
-        return secret
-
-    async def _send_json(self, data: dict):
-        if self.websocket_client:
-            await self.websocket_client.send(json.dumps(data))
-
-    async def _subscribe(self):
-        """Subscribes to channels based on the client's scope."""
-        channels = []
-        method = "public/subscribe"
-
-        if self.subscription_scope == "public":
-            if not self.instruments_to_subscribe:
-                log.warning(
-                    f"[{self.exchange_name}] No instruments provided for public subscription."
-                )
-                return
-            log.info(
-                f"[{self.exchange_name}] Building public subscriptions for {len(self.instruments_to_subscribe)} instruments."
-            )
-            for instrument in self.instruments_to_subscribe:
-                channels.append(f"trades.{instrument['instrument_name']}.raw")
-
-        elif self.subscription_scope == "private":
-            method = "private/subscribe"
-            channels = ["user.orders.any.any.raw", "user.trades.any.any.raw"]
-
-        if not channels:
-            log.warning(
-                f"[{self.exchange_name}] No channels to subscribe to for scope '{self.subscription_scope}'."
-            )
+    async def _send_rpc(self, method: str, channels: List[str]):
+        """Safely sends a JSON-RPC formatted request to the WebSocket."""
+        await self._connected.wait()
+        if not self._ws or not channels:
             return
 
-        chunk_size = 100
-        for i in range(0, len(channels), chunk_size):
-            chunk = channels[i : i + chunk_size]
+        try:
             msg = {
                 "jsonrpc": "2.0",
-                "id": int(time.time() * 1000) + i,
+                "id": int(time.time() * 1000),
                 "method": method,
-                "params": {"channels": chunk},
+                "params": {"channels": channels},
             }
-            log.info(
-                f"[{self.exchange_name}][{self.subscription_scope}] Sending subscription request for {len(chunk)} channels."
-            )
-            await self._send_json(msg)
+            log.debug(f"[{self.exchange_name}] Sending RPC: {msg}")
+            await self._ws.send(orjson.dumps(msg))
+        except websockets.exceptions.ConnectionClosed:
+            log.warning(f"[{self.exchange_name}] Failed to send RPC: Connection is closed.")
+        except Exception as e:
+            log.error(f"[{self.exchange_name}] Unhandled error sending RPC: {e}")
 
-    def _handle_control_message(self, data: dict) -> bool:
-        method = data.get("method")
-        if method == "heartbeat":
-            params = data.get("params")
-            if isinstance(params, dict) and params.get("type") == "test_request":
-                asyncio.create_task(
-                    self._send_json(
-                        {"jsonrpc": "2.0", "id": 0, "method": "public/test"}
-                    )
-                )
-            return True
-        if "id" in data and "result" in data:
-            log.debug(f"Received RPC confirmation for request ID {data.get('id')}")
-            return True
-        return False
+    async def _send_subscribe(self, channels: List[str]):
+        await self._send_rpc("public/subscribe", channels)
+
+    async def _send_unsubscribe(self, channels: List[str]):
+        await self._send_rpc("public/unsubscribe", channels)
 
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
-        AUTH_ID = 9929
+        """Manages the raw WebSocket connection and handles Deribit's auth (if needed)."""
+        try:
+            async with websockets.connect(self.ws_connection_url, ping_interval=30) as ws:
+                self._ws = ws
+                self._connected.set()
+                log.success(f"[{self.exchange_name}] WebSocket connection established.")
 
-        auth_msg = {
-            "jsonrpc": "2.0",
-            "id": AUTH_ID,
-            "method": "public/auth",
-            "params": {
-                "grant_type": "client_credentials",
-                "client_id": self._get_secret_value(self._client_id),
-                "client_secret": self._get_secret_value(self._client_secret),
-            },
-        }
+                if self._active_channels:
+                    log.info(f"[{self.exchange_name}] Re-subscribing to {len(self._active_channels)} active channels.")
+                    await self._send_subscribe(list(self._active_channels))
 
-        async with websockets.connect(self.ws_connection_url, ping_interval=30) as ws:
-            self.websocket_client = ws
-            log.info(
-                f"[{self.exchange_name}][{self.subscription_scope}] WebSocket connection established."
-            )
-
-            is_authenticated = self.subscription_scope != "private"
-
-            if not is_authenticated:
-                await self._send_json(auth_msg)
-
-            if self.subscription_scope == "public":
-                await self._subscribe()
-
-            async for message in ws:
-                try:
-                    data = orjson.loads(message)
-                    if not isinstance(data, dict):
-                        continue
-
-                    if not is_authenticated:
-                        if data.get("id") == AUTH_ID:
-                            if "error" in data:
-                                log.error(
-                                    f"[{self.exchange_name}] Authentication failed: {data['error']}"
+                async for message in ws:
+                    try:
+                        data = orjson.loads(message)
+                        params = data.get("params")
+                        if isinstance(params, dict) and "channel" in params and "data" in params:
+                            # Deribit trade data is always a list, even for a single trade.
+                            for trade in params["data"]:
+                                yield StreamMessage(
+                                    exchange=self.exchange_name,
+                                    channel=params["channel"],
+                                    timestamp=trade.get("timestamp"),
+                                    data={
+                                        "symbol": trade.get("instrument_name"),
+                                        "price": trade.get("price"),
+                                        "quantity": trade.get("amount"),
+                                    },
                                 )
-                                return
-                            log.success(
-                                f"[{self.exchange_name}] Authentication successful."
-                            )
-                            is_authenticated = True
-                            await self._subscribe()
-                        continue
+                    except (orjson.JSONDecodeError, KeyError, TypeError) as e:
+                        log.error(f"[{self.exchange_name}] Error processing message: {e}")
+        finally:
+            self._ws = None
+            self._connected.clear()
+            log.warning(f"[{self.exchange_name}] WebSocket connection closed.")
 
-                    if self._handle_control_message(data):
-                        continue
-
-                    params = data.get("params")
-                    if (
-                        isinstance(params, dict)
-                        and "channel" in params
-                        and "data" in params
-                    ):
-                        yield StreamMessage(
-                            exchange=self.exchange_name,
-                            channel=params["channel"],
-                            timestamp=int(time.time() * 1000),
-                            data=params["data"],
-                        )
-                except orjson.JSONDecodeError:
-                    log.warning(f"Invalid JSON received: {message[:100]}...")
-                except Exception:
-                    log.exception("Error processing message")
+    async def _process_message_batch(self):
+        """Inner loop that consumes from the `connect` generator and processes data."""
+        batch = deque()
+        async for message in self.connect():
+            await self.market_data_repo.cache_ticker(message.data["symbol"], message.data)
+            batch.append(message)
+            if len(batch) >= 100:
+                await self.market_data_repo.add_messages_to_stream(self.stream_name, list(batch))
+                batch.clear()
 
     async def process_messages(self):
+        """The main supervisor loop, identical in function to the Binance client's."""
         self._is_running.set()
         reconnect_attempts = 0
-        log.info(
-            f"[{self.exchange_name}][{self.subscription_scope}] Starting message processor."
-        )
-
         while self._is_running.is_set():
-            try:
-                batch = deque()
-                async for message in self.connect():
-                    if not self._is_running.is_set():
-                        break
+            subscription_task = asyncio.create_task(self._maintain_subscriptions())
+            message_task = asyncio.create_task(self._process_message_batch())
 
-                    reconnect_attempts = 0
-                    batch.append(message)
+            done, pending = await asyncio.wait(
+                {subscription_task, message_task}, return_when=asyncio.FIRST_COMPLETED
+            )
 
-                    if len(batch) >= 100:
-                        is_flushed = False
-                        while not is_flushed and self._is_running.is_set():
-                            try:
-                                await self.market_data_repo.add_messages_to_stream(
-                                    self.stream_name, list(batch)
-                                )
-                                is_flushed = True
-                                batch.clear()
-                            except ConnectionError:
-                                log.error(
-                                    f"[{self.exchange_name}] Failed to flush batch to Redis. Retrying in 5s..."
-                                )
-                                await asyncio.sleep(5)
+            for task in pending:
+                task.cancel()
 
-            except asyncio.CancelledError:
-                break
-            except (
-                websockets.exceptions.ConnectionClosed,
-                ConnectionRefusedError,
-                asyncio.TimeoutError,
-            ) as e:
-                log.warning(
-                    f"[{self.exchange_name}] WebSocket connection error: {type(e).__name__}. Will reconnect."
-                )
-            except Exception:
-                log.exception(
-                    f"[{self.exchange_name}] Unhandled error in processor for scope '{self.subscription_scope}'"
-                )
-            finally:
-                if self.websocket_client:
-                    await self.websocket_client.close()
-                    self.websocket_client = None
-
-                if self._is_running.is_set():
-                    reconnect_attempts += 1
-                    delay = min(2**reconnect_attempts, 60) + random.random()
-                    log.info(f"[{self.exchange_name}] Reconnecting in {delay:.1f}s...")
-                    await asyncio.sleep(delay)
-
-        log.info(
-            f"[{self.exchange_name}][{self.subscription_scope}] Message processor shut down."
-        )
+            if self._is_running.is_set():
+                reconnect_attempts += 1
+                delay = min(2**reconnect_attempts, 60)
+                log.info(f"[{self.exchange_name}] Supervisor restarting tasks in {delay}s (attempt {reconnect_attempts})...")
+                await asyncio.sleep(delay)
 
     async def close(self):
-        log.info(f"[{self.exchange_name}][{self.subscription_scope}] Closing client...")
+        """Initiates a graceful shutdown of the client."""
+        log.info(f"[{self.exchange_name}] Closing client...")
         self._is_running.clear()
-        if self.websocket_client:
-            try:
-                await self.websocket_client.close()
-            except websockets.exceptions.ConnectionClosed:
-                pass
-        log.info(f"[{self.exchange_name}][{self.subscription_scope}] Client closed.")
+        if self._ws:
+            await self._ws.close()
+        log.info(f"[{self.exchange_name}] Client closed.")
