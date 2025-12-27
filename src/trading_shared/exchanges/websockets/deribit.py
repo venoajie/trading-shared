@@ -1,4 +1,3 @@
-
 # --- Built Ins  ---
 import asyncio
 import json
@@ -158,7 +157,7 @@ class DeribitWsClient(AbstractWsClient):
             )
 
             is_authenticated = self.subscription_scope != "private"
-            
+
             if not is_authenticated:
                 await self._send_json(auth_msg)
 

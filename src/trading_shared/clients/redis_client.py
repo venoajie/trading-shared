@@ -1,4 +1,3 @@
-
 # src/trading_shared/clients/redis_client.py
 
 # --- Built Ins  ---
@@ -317,6 +316,7 @@ class CustomRedisClient:
             dlq_stream_name = f"deadletter:queue:malformed:{original_stream_name}"
 
         try:
+
             async def command(pool: aioredis.Redis):
                 pipe = pool.pipeline()
                 for msg in failed_messages:
@@ -325,7 +325,9 @@ class CustomRedisClient:
                     )
                 await pipe.execute()
 
-            await self.execute_resiliently(command, f"pipeline.execute(xadd_dlq to {dlq_stream_name})")
+            await self.execute_resiliently(
+                command, f"pipeline.execute(xadd_dlq to {dlq_stream_name})"
+            )
             log.warning(
                 f"{len(failed_messages)} message(s) moved to DLQ stream '{dlq_stream_name}' from '{original_stream_name}'"
             )
@@ -333,8 +335,8 @@ class CustomRedisClient:
             log.critical(
                 f"CRITICAL: Failed to write to DLQ stream '{dlq_stream_name}': {e}"
             )
-    # --- END: REMEDIATION FOR FLAW 1 ---
 
+    # --- END: REMEDIATION FOR FLAW 1 ---
 
     async def ensure_consumer_group(
         self,
@@ -438,7 +440,7 @@ class CustomRedisClient:
         """
         DEPRECATED: This method accesses obsolete keys and violates the centralized
         state management protocol defined in DATA_CONTRACTS.md v2.0.
-        
+
         ARCHITECTURAL MANDATE: Services must receive a state manager repository via
         dependency injection. Direct state access via this client is forbidden.
         """
@@ -446,6 +448,7 @@ class CustomRedisClient:
             "get_system_state is deprecated. Use a dedicated SystemStateManager "
             "to ensure compliance with the hierarchical state protocol."
         )
+
     # --- END: REMEDIATION FOR FLAW 2 ---
 
     async def set_system_state(
@@ -500,6 +503,7 @@ class CustomRedisClient:
         message: str | bytes,
     ):
         """Publishes a message to a channel."""
+
         async def command(conn: aioredis.Redis):
             return await conn.publish(channel, message)
 
@@ -531,6 +535,7 @@ class CustomRedisClient:
         name: str,
     ) -> dict[bytes, bytes]:
         """Returns all fields and values of the hash stored at key."""
+
         async def command(conn: aioredis.Redis):
             return await conn.hgetall(name)
 
@@ -548,11 +553,13 @@ class CustomRedisClient:
         or a mapping of multiple key/value pairs.
         """
         if mapping is not None:
+
             async def command(conn: aioredis.Redis):
                 await conn.hset(name, mapping=mapping)
 
             await self.execute_resiliently(command, f"HSET {name} [MAPPING]")
         elif key is not None:
+
             async def command(conn: aioredis.Redis):
                 await conn.hset(name, key, value)
 
@@ -568,6 +575,7 @@ class CustomRedisClient:
         """
         Sets a timeout on a key.
         """
+
         async def command(conn: aioredis.Redis):
             return await conn.expire(name, time)
 
@@ -586,6 +594,7 @@ class CustomRedisClient:
             else v
             for k, v in fields.items()
         }
+
         async def command(conn: aioredis.Redis):
             await conn.xadd(
                 name, encoded_fields, maxlen=maxlen, approximate=approximate
