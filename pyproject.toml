@@ -3,7 +3,7 @@
 [project]
 name = "trading-shared"
 version = "0.10.45"
-description = "Consolidated shared clients and utilities for the trading platform."
+description = "Consolidated shared clients and utilities for the trading platform"
 
 dependencies = [
     "aiohttp==3.13.2",
