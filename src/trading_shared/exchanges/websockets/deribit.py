@@ -3,7 +3,6 @@
 
 # --- Built Ins ---
 import asyncio
-import random
 import time
 from collections import deque
 from typing import AsyncGenerator, Dict, List, Optional, Set
@@ -14,10 +13,14 @@ import websockets
 from loguru import logger as log
 
 # --- Local Application Imports ---
+from ...config.models import ExchangeSettings
+from ...repositories.instrument_repository import InstrumentRepository
+from ...repositories.market_data_repository import MarketDataRepository
+from ...repositories.system_state_repository import SystemStateRepository
 from .base import AbstractWsClient
 
 # --- Shared Library Imports ---
-from trading_engine_core.models import StreamMessage
+from trading_engine_core.models import MarketDefinition, StreamMessage
 
 
 class DeribitWsClient(AbstractWsClient):
@@ -26,8 +29,33 @@ class DeribitWsClient(AbstractWsClient):
     symbols to Deribit's format and maintains its own subscriptions.
     """
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(
+        self,
+        market_definition: MarketDefinition,
+        market_data_repo: MarketDataRepository,
+        instrument_repo: InstrumentRepository,
+        system_state_repo: SystemStateRepository,
+        stream_name: str,
+        universe_state_key: str,
+        redis_client: websockets.RedisClient,
+        settings: ExchangeSettings,
+        shard_id: int = 0,
+        total_shards: int = 1,
+    ):
+        # FIX: Explicitly pass parent arguments to super().__init__
+        super().__init__(
+            market_definition=market_definition,
+            market_data_repo=market_data_repo,
+            instrument_repo=instrument_repo,
+            system_state_repo=system_state_repo,
+            stream_name=stream_name,
+            universe_state_key=universe_state_key,
+            redis_client=redis_client,
+            shard_id=shard_id,
+            total_shards=total_shards,
+        )
+        # Store child-specific dependencies
+        self.settings = settings
         self.ws_connection_url = self.market_def.ws_base_url
         self._ws: websockets.WebSocketClientProtocol | None = None
         self._connected = asyncio.Event()
@@ -35,16 +63,13 @@ class DeribitWsClient(AbstractWsClient):
     def _get_channels_from_universe(self, universe: List[str]) -> Set[str]:
         """
         Maps canonical universe symbols to Deribit's required channel name format.
-        This is a critical anti-corruption layer.
         """
         my_targets = set()
         for symbol in universe:
-            # This mapping is an example and must be maintained as the universe expands.
             if symbol == "BTCUSDT":
                 my_targets.add("trades.BTC-PERPETUAL.raw")
             elif symbol == "ETHUSDT":
                 my_targets.add("trades.ETH-PERPETUAL.raw")
-            # All other symbols in the universe are ignored by this client.
         return my_targets
 
     async def _send_rpc(self, method: str, channels: List[str]):
@@ -74,7 +99,7 @@ class DeribitWsClient(AbstractWsClient):
         await self._send_rpc("public/unsubscribe", channels)
 
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
-        """Manages the raw WebSocket connection and handles Deribit's auth (if needed)."""
+        """Manages the raw WebSocket connection."""
         try:
             async with websockets.connect(self.ws_connection_url, ping_interval=30) as ws:
                 self._ws = ws
@@ -90,7 +115,6 @@ class DeribitWsClient(AbstractWsClient):
                         data = orjson.loads(message)
                         params = data.get("params")
                         if isinstance(params, dict) and "channel" in params and "data" in params:
-                            # Deribit trade data is always a list, even for a single trade.
                             for trade in params["data"]:
                                 yield StreamMessage(
                                     exchange=self.exchange_name,
@@ -120,7 +144,7 @@ class DeribitWsClient(AbstractWsClient):
                 batch.clear()
 
     async def process_messages(self):
-        """The main supervisor loop, identical in function to the Binance client's."""
+        """The main supervisor loop for this client."""
         self._is_running.set()
         reconnect_attempts = 0
         while self._is_running.is_set():
