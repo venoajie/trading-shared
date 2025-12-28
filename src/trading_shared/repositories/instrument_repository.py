@@ -36,9 +36,8 @@ class InstrumentRepository:
             AND instrument_kind = $3
             LIMIT 1;
         """
-        return await self._db.fetch_row(
-            query, exchange, canonical_name, instrument_kind
-        )
+
+        return await self._db.fetchrow(query, exchange, canonical_name, instrument_kind)
 
     async def bulk_upsert(self, instruments: List[Dict[str, Any]], exchange_name: str):
         if not instruments:

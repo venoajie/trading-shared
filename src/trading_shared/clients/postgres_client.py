@@ -123,7 +123,7 @@ class PostgresClient:
                 log.info("PostgreSQL connection pool closed.")
                 self._pool = None
 
-    async def _setup_json_codec(self, connection: asyncpg.Connection):
+    async def _setup_json_codec_deprecated(self, connection: asyncpg.Connection):
         for json_type in ["jsonb", "json"]:
             await connection.set_type_codec(
                 json_type,
