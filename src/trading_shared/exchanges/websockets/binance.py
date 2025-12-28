@@ -46,27 +46,27 @@ class BinanceWsClient(AbstractWsClient):
         self.system_state_repo = system_state_repo
         self.universe_state_key = universe_state_key
         self.settings = settings
-        # Note: shard_id and total_shards are now set on the base class.
 
         self.ws_connection_url = self.market_def.ws_base_url
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
         self._connected = asyncio.Event()
 
     async def _get_channels_from_universe(self, universe: List[str]) -> Set[str]:
-        """
-        Filters the canonical universe for this client's specific shard and
-        maps the symbols to Binance's required channel name format.
-        """
-        my_targets = set()
 
+        my_targets = set()
         valid_symbols = [
             symbol for symbol in universe if "UP" not in symbol and "DOWN" not in symbol
         ]
-
         for i, symbol in enumerate(sorted(valid_symbols)):
             if i % self.total_shards == self.shard_id:
                 my_targets.add(f"{symbol.lower()}@trade")
         return my_targets
+
+    def _chunk_list(self, data: List[str], chunk_size: int) -> List[List[str]]:
+        """Helper to break a list into smaller chunks."""
+        if not data:
+            return []
+        return [data[i:i + chunk_size] for i in range(0, len(data), chunk_size)]
 
     async def _send_request(self, method: str, params: List[str]):
         """Safely sends a subscription request, now with chunking."""
@@ -74,7 +74,6 @@ class BinanceWsClient(AbstractWsClient):
         if not self._ws or not params:
             return
 
-        # Binance subscription limit is not officially documented but 100-200 is a safe chunk size.
         param_chunks = self._chunk_list(params, 100)
 
         for chunk in param_chunks:
@@ -83,13 +82,13 @@ class BinanceWsClient(AbstractWsClient):
                 payload = {"method": method.upper(), "params": chunk, "id": request_id}
                 log.debug(f"[{self.market_def.market_id}] Sending WS request chunk: {len(chunk)} params")
                 await self._ws.send(orjson.dumps(payload))
-                await asyncio.sleep(0.1) # Small delay to avoid rate limiting
+                await asyncio.sleep(0.1)
             except websockets.exceptions.ConnectionClosed:
                 log.warning(f"[{self.market_def.market_id}] Failed to send request chunk: Connection closed.")
-                break # Stop sending if connection drops
+                break
             except Exception as e:
                 log.error(f"[{self.market_def.market_id}] Unhandled error sending request chunk: {e}")
-    
+
     async def _send_subscribe(self, channels: List[str]):
         await self._send_request("SUBSCRIBE", channels)
 
