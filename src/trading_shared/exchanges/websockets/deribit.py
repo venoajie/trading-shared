@@ -30,7 +30,6 @@ class DeribitWsClient(AbstractWsClient):
         market_data_repo: MarketDataRepository,
         instrument_repo: InstrumentRepository,
         settings: ExchangeSettings,
-        stream_name: str,
         subscription_scope: str = "public",
         system_state_repo: Optional[SystemStateRepository] = None,
         universe_state_key: Optional[str] = None,
@@ -38,7 +37,6 @@ class DeribitWsClient(AbstractWsClient):
         super().__init__(
             market_definition,
             market_data_repo,
-            stream_name,
             shard_id=0,
             total_shards=1
         )
