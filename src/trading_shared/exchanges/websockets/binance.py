@@ -54,14 +54,24 @@ class BinanceWsClient(AbstractWsClient):
     async def _get_channels_from_universe(self, universe: List[str]) -> Set[str]:
 
         my_targets = set()
-        valid_symbols = [
-            symbol for symbol in universe if "UP" not in symbol and "DOWN" not in symbol
-        ]
-        for i, symbol in enumerate(sorted(valid_symbols)):
-            if i % self.total_shards == self.shard_id:
-                my_targets.add(f"{symbol.lower()}@trade")
-        return my_targets
+        
+        # Iterate through the rich universe objects.
+        for instrument_data in universe:
+            # Filter for instruments belonging to this exchange.
+            if instrument_data.get("exchange") == self.exchange_name:
+                # Directly use the spot symbol, ensuring contextual correctness.
+                spot_symbol = instrument_data.get("spot_symbol")
+                if spot_symbol and "UP" not in spot_symbol and "DOWN" not in spot_symbol:
+                    my_targets.add(spot_symbol)
 
+        # The sharding logic is now applied to a pre-filtered, contextually correct list.
+        sharded_targets = set()
+        for i, symbol in enumerate(sorted(list(my_targets))):
+            if i % self.total_shards == self.shard_id:
+                sharded_targets.add(f"{symbol.lower()}@trade")
+        
+        return sharded_targets
+    
     def _chunk_list(self, data: List[str], chunk_size: int) -> List[List[str]]:
         """Helper to break a list into smaller chunks."""
         if not data:

@@ -1,7 +1,7 @@
 # src/shared/trading_shared/repositories/system_state_repository.py
 
 # --- Built Ins ---
-from typing import List
+from typing import List, Any, Dict
 
 # --- Installed ---
 import orjson
@@ -17,7 +17,7 @@ class SystemStateRepository:
     def __init__(self, redis_client: CustomRedisClient):
         self.redis = redis_client
 
-    async def set_active_universe(self, key: str, symbols: List[str], ttl_seconds: int):
+    async def set_active_universe(self, universe: List[Dict[str, Any]], key: str, ttl_seconds: int):
         """
         Sets the canonical list of active instruments in the trading universe.
 
@@ -27,13 +27,11 @@ class SystemStateRepository:
             ttl_seconds: The time-to-live for the Redis key.
         """
         try:
-            payload = orjson.dumps(symbols)
+            payload = orjson.dumps(universe)
             await self.redis.set(key, payload, ex=ttl_seconds)
-            log.debug(
-                f"Set universe state for key '{key}' with {len(symbols)} symbols."
-            )
+            log.debug(f"Set rich universe state on key '{key}' with {len(universe)} instruments.")
         except Exception:
-            log.exception(f"Failed to set active universe state for key '{key}'.")
+            log.exception(f"Failed to set rich universe state for key '{key}'.")
 
     async def get_active_universe(self, key: str) -> List[str]:
         """
@@ -48,9 +46,10 @@ class SystemStateRepository:
         try:
             payload = await self.redis.get(key)
             if not payload:
-                log.warning(f"Universe state key '{key}' not found or is empty.")
+                log.warning(f"Rich universe state key '{key}' not found or is empty.")
                 return []
+            # The type hint is now accurate.
             return orjson.loads(payload)
         except Exception:
-            log.exception(f"Failed to get or parse universe state from key '{key}'.")
+            log.exception(f"Failed to get or parse rich universe state from key '{key}'.")
             return []

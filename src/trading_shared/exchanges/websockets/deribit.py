@@ -57,41 +57,22 @@ class DeribitWsClient(AbstractWsClient):
 
     async def _get_channels_from_universe(self, universe: List[str]) -> Set[str]:
         """
-        REFACTORED: Correctly maps the canonical universe symbols to Deribit's
+        Correctly maps the canonical universe symbols to Deribit's
         specific channel names. This method now correctly consumes the state
         published by the strategist service, adhering to the architecture.
         """
-        if not universe:
-            return set()
-
-        log.debug(f"[{self.exchange_name}] Building subscription list from a universe of {len(universe)} symbols.")
-        
-        # 1. Fetch all Deribit instruments to create a lookup map.
-        all_deribit_instruments = await self.instrument_repo.fetch_by_exchange(self.exchange_name)
-        if not all_deribit_instruments:
-            log.warning(f"[{self.exchange_name}] Instrument repository returned no instruments. Cannot map universe.")
-            return set()
-
-        # 2. Map from a canonical BASE_ASSET to the perpetual instrument name.
-        base_asset_to_perp_map = {
-            str(instrument.get("base_asset")).upper(): instrument.get("instrument_name")
-            for instrument in all_deribit_instruments
-            if instrument.get("instrument_kind") == "perpetual"
-        }
-
-        # 3. Iterate the canonical universe and perform the lookup.
         my_targets = set()
-        for symbol in universe:
-            # A simple utility to extract the base asset would be ideal here,
-            # but for now we assume a common quote asset per the universe rules.
-            base_asset = symbol.replace("USDT", "").upper()
-            deribit_instrument = base_asset_to_perp_map.get(base_asset)
-            if deribit_instrument:
-                my_targets.add(f"trades.{deribit_instrument}.raw")
+        for instrument_data in universe:
+            # Filter for instruments that belong to this exchange.
+            if instrument_data.get("exchange") == self.exchange_name:
+                # Directly use the perpetual symbol if it exists.
+                perp_symbol = instrument_data.get("perp_symbol")
+                if perp_symbol:
+                    my_targets.add(f"trades.{perp_symbol}.raw")
 
-        log.info(f"[{self.exchange_name}] Mapped universe to {len(my_targets)} perpetuals for subscription.")
+        log.info(f"[{self.exchange_name}] Mapped rich universe to {len(my_targets)} perpetuals for subscription.")
         return my_targets
-    
+
     async def _send_rpc(self, method: str, params: dict):
         """Safely sends a JSON-RPC formatted request to the WebSocket."""
         await self._connected.wait()
