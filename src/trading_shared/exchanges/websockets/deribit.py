@@ -12,7 +12,6 @@ import websockets
 from loguru import logger as log
 
 # --- Local Application Imports ---
-from ...clients.redis_client import CustomRedisClient
 from ...config.models import ExchangeSettings
 from ...repositories.instrument_repository import InstrumentRepository
 from ...repositories.market_data_repository import MarketDataRepository
@@ -21,12 +20,10 @@ from .base import AbstractWsClient
 
 # --- Shared Library Imports ---
 from trading_engine_core.models import MarketDefinition, StreamMessage
-from ...repositories.instrument_repository import InstrumentRepository
 
 
 class DeribitWsClient(AbstractWsClient):
     """A dual-purpose, self-managing WebSocket client for Deribit."""
-
     def __init__(
         self,
         market_definition: MarketDefinition,
@@ -35,17 +32,19 @@ class DeribitWsClient(AbstractWsClient):
         settings: ExchangeSettings,
         stream_name: str,
         subscription_scope: str = "public",
-        redis_client: Optional[CustomRedisClient] = None,
         system_state_repo: Optional[SystemStateRepository] = None,
         universe_state_key: Optional[str] = None,
     ):
         super().__init__(
-            market_definition, market_data_repo, stream_name, shard_id=0, total_shards=1
+            market_definition,
+            market_data_repo,
+            stream_name,
+            shard_id=0,
+            total_shards=1
         )
         self.instrument_repo = instrument_repo
         self.settings = settings
         self.subscription_scope = subscription_scope.lower()
-        self.redis_client = redis_client
         self.system_state_repo = system_state_repo
         self.universe_state_key = universe_state_key
 
@@ -53,46 +52,37 @@ class DeribitWsClient(AbstractWsClient):
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
         self._connected = asyncio.Event()
 
-        if self.subscription_scope == "private" and (
-            not settings.client_id or not settings.client_secret
-        ):
-            raise ValueError(
-                "Deribit private scope requires client_id and client_secret."
-            )
-        if self.subscription_scope == "public" and (
-            not system_state_repo or not universe_state_key
-        ):
-            raise ValueError(
-                "Deribit public scope requires system_state_repo and universe_state_key."
-            )
+        if self.subscription_scope == "private" and (not settings.client_id or not settings.client_secret):
+            raise ValueError("Deribit private scope requires client_id and client_secret.")
+        # Public scope no longer strictly requires these, as it can self-determine its subscriptions.
+        # This check could be removed or demoted to a warning if dynamic universe is not used.
 
     async def _get_channels_from_universe(self, universe: List[str]) -> Set[str]:
         """
-        Maps canonical universe symbols to Deribit's public trade channel names
-        by dynamically looking up the correct instrument name from the database.
+        REFACTORED: Ignores the (potentially contaminated) universe parameter.
+        Builds a subscription list by querying the database directly for all
+        perpetual instruments belonging to the Deribit exchange. This makes
+        the client self-sufficient and architecturally robust.
         """
+        log.debug(f"[{self.exchange_name}] Building subscription list from database.")
         my_targets = set()
-        # Create a list of tasks to run the DB lookups concurrently for performance.
-        tasks = [
-            self.instrument_repo.find_instrument_by_name_and_kind(
-                exchange=self.exchange_name,
-                canonical_name=symbol,
-                instrument_kind="perpetual",
-            )
-            for symbol in universe
-        ]
+        try:
+            # Fetch all instruments specifically for the 'deribit' exchange.
+            deribit_instruments = await self.instrument_repo.fetch_by_exchange(self.exchange_name)
+            
+            for instrument in deribit_instruments:
+                # Filter for perpetual futures only.
+                if instrument.get("instrument_kind") == "perpetual":
+                    instrument_name = instrument.get("instrument_name")
+                    if instrument_name:
+                        my_targets.add(f"trades.{instrument_name}.raw")
 
-        results = await asyncio.gather(*tasks)
+            log.info(f"[{self.exchange_name}] Identified {len(my_targets)} perpetual instruments for subscription.")
+        except Exception:
+            log.exception(f"[{self.exchange_name}] Failed to build subscription list from database.")
 
-        for i, instrument in enumerate(results):
-            if instrument:
-                my_targets.add(f"trades.{instrument['instrument_name']}.raw")
-            else:
-                symbol = universe[i]
-                log.warning(
-                    f"[{self.exchange_name}] Could not find a perpetual instrument for '{symbol}' in the database. Cannot subscribe."
-                )
         return my_targets
+
 
     async def _send_rpc(self, method: str, params: dict):
         """Safely sends a JSON-RPC formatted request to the WebSocket."""
