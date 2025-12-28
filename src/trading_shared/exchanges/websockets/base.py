@@ -13,6 +13,7 @@ from loguru import logger as log
 from ...repositories.market_data_repository import MarketDataRepository
 from trading_engine_core.models import StreamMessage, MarketDefinition
 
+
 class AbstractWsClient(ABC):
     """Abstract base class for exchange-specific WebSocket clients."""
 
@@ -43,15 +44,25 @@ class AbstractWsClient(ABC):
         self._is_running = asyncio.Event()
 
     async def _maintain_subscriptions(self, poll_interval_s: int = 30):
-        if not hasattr(self, 'system_state_repo') or not self.system_state_repo or not self.universe_state_key:
-            log.warning(f"[{self.market_def.market_id}] Dynamic subscriptions disabled (missing config).")
+        if (
+            not hasattr(self, "system_state_repo")
+            or not self.system_state_repo
+            or not self.universe_state_key
+        ):
+            log.warning(
+                f"[{self.market_def.market_id}] Dynamic subscriptions disabled (missing config)."
+            )
             return
 
-        log.info(f"[{self.market_def.market_id}] Starting subscription manager (Shard {self.shard_id + 1}/{self.total_shards}).")
+        log.info(
+            f"[{self.market_def.market_id}] Starting subscription manager (Shard {self.shard_id + 1}/{self.total_shards})."
+        )
 
         async def _update():
             try:
-                universe = await self.system_state_repo.get_active_universe(self.universe_state_key)
+                universe = await self.system_state_repo.get_active_universe(
+                    self.universe_state_key
+                )
                 needed_channels = await self._get_channels_from_universe(universe)
 
                 if needed_channels != self._active_channels:
@@ -64,9 +75,14 @@ class AbstractWsClient(ABC):
                         await self._send_subscribe(list(to_add))
 
                     self._active_channels = needed_channels
-                    log.info(f"[{self.market_def.market_id}] Subscription state updated: {len(self._active_channels)} channels active.")
+                    log.info(
+                        f"[{self.market_def.market_id}] Subscription state updated: {len(self._active_channels)} channels active."
+                    )
             except Exception as e:
-                log.error(f"[{self.market_def.market_id}] Error during subscription update: {e}", exc_info=True)
+                log.error(
+                    f"[{self.market_def.market_id}] Error during subscription update: {e}",
+                    exc_info=True,
+                )
 
         await _update()
 
