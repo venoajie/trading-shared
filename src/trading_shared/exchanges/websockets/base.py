@@ -4,7 +4,7 @@
 import asyncio
 import random
 from abc import ABC, abstractmethod
-from typing import AsyncGenerator, List, Optional, Set
+from typing import AsyncGenerator, List, Optional, Set, Dict
 
 # --- Installed ---
 from loguru import logger as log
@@ -19,28 +19,37 @@ from ...repositories.system_state_repository import SystemStateRepository
 from trading_engine_core.models import StreamMessage, MarketDefinition
 
 
+
 class AbstractWsClient(ABC):
+    """Abstract base class for exchange-specific WebSocket clients."""
+
     def __init__(
         self,
         market_definition: MarketDefinition,
         market_data_repo: MarketDataRepository,
         instrument_repo: InstrumentRepository,
-        redis_client: Optional[CustomRedisClient] = None,
-        stream_name: str | None = None,
-        system_state_repo: Optional[SystemStateRepository] = None,
-        universe_state_key: str | None = None,
-        shard_id: int = 0,
-        total_shards: int = 1,
+        stream_name: str,
+        dynamic_subscription_deps: Optional[Dict[str, Any]] = None,
+        private_subscription_deps: Optional[Dict[str, Any]] = None,
     ):
         self.market_def = market_definition
         self.exchange_name = self.market_def.exchange
         self.market_data_repo = market_data_repo
         self.instrument_repo = instrument_repo
-        self.redis_client = redis_client
-        self.system_state_repo = system_state_repo
-        self.universe_state_key = universe_state_key
-        self.shard_id = shard_id
-        self.total_shards = total_shards
+        self.stream_name = stream_name
+
+        # Explicitly unpack dependencies based on client type.
+        # This makes the contract clearer for implementers.
+        self.system_state_repo: Optional[SystemStateRepository] = None
+        self.universe_state_key: Optional[str] = None
+        if dynamic_subscription_deps:
+            self.system_state_repo = dynamic_subscription_deps["system_state_repo"]
+            self.universe_state_key = dynamic_subscription_deps["universe_state_key"]
+        
+        self.redis_client: Optional[CustomRedisClient] = None
+        if private_subscription_deps:
+            self.redis_client = private_subscription_deps["redis_client"]
+
         self._active_channels: Set[str] = set()
         self._is_running = asyncio.Event()
 

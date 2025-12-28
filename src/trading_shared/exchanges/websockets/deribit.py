@@ -65,16 +65,27 @@ class DeribitWsClient(AbstractWsClient):
         if self.subscription_scope == "private" and (not settings.client_id or not settings.client_secret):
             raise ValueError("Deribit private scope requires client_id and client_secret.")
 
-    def _get_channels_from_universe(self, universe: List[str]) -> Set[str]:
-        """Maps canonical universe symbols to Deribit's public trade channel names."""
+    async def _get_channels_from_universe(self, universe: List[str]) -> Set[str]:
+        """
+        Maps canonical universe symbols to Deribit's public trade channel names
+        by dynamically looking up the correct instrument name from the database.
+        """
+        # REFACTOR: Removed all hardcoded logic.
         my_targets = set()
         for symbol in universe:
-            if symbol == "BTCUSDT":
-                my_targets.add("trades.BTC-PERPETUAL.raw")
-            elif symbol == "ETHUSDT":
-                my_targets.add("trades.ETH-PERPETUAL.raw")
+            # Look up the perpetual futures instrument for the given canonical symbol.
+            instrument = await self.instrument_repo.find_instrument_by_name_and_kind(
+                exchange=self.exchange_name,
+                canonical_name=symbol,
+                instrument_kind="perpetual"
+            )
+            if instrument:
+                # Use the actual instrument name from the database for the subscription.
+                my_targets.add(f"trades.{instrument['instrument_name']}.raw")
+            else:
+                log.warning(f"[{self.exchange_name}] Could not find a perpetual instrument for '{symbol}' in the database. Cannot subscribe.")
         return my_targets
-
+    
     async def _send_rpc(self, method: str, params: dict):
         """Safely sends a JSON-RPC formatted request to the WebSocket."""
         await self._connected.wait()
