@@ -1,4 +1,3 @@
-
 # src/trading_shared/exchanges/websockets/deribit.py
 
 # --- Built Ins ---
@@ -22,14 +21,11 @@ from .base import AbstractWsClient
 
 # --- Shared Library Imports ---
 from trading_engine_core.models import MarketDefinition, StreamMessage
+from ...repositories.instrument_repository import InstrumentRepository 
 
 
 class DeribitWsClient(AbstractWsClient):
-    """
-    A dual-purpose, self-managing WebSocket client for Deribit. It supports both
-    dynamic public subscriptions and authenticated private subscriptions.
-    """
-
+    """A dual-purpose, self-managing WebSocket client for Deribit."""
     def __init__(
         self,
         market_definition: MarketDefinition,
@@ -37,40 +33,34 @@ class DeribitWsClient(AbstractWsClient):
         instrument_repo: InstrumentRepository,
         settings: ExchangeSettings,
         stream_name: str,
+        subscription_scope: str = "public",
         redis_client: Optional[CustomRedisClient] = None,
         system_state_repo: Optional[SystemStateRepository] = None,
         universe_state_key: Optional[str] = None,
-        shard_id: int = 0,
-        total_shards: int = 1,
-        # FIX: Re-introduce subscription_scope for dual-purpose functionality.
-        subscription_scope: str = "public",
     ):
-        super().__init__(
-            market_definition=market_definition,
-            market_data_repo=market_data_repo,
-            instrument_repo=instrument_repo,
-            system_state_repo=system_state_repo,
-            stream_name=stream_name,
-            universe_state_key=universe_state_key,
-            redis_client=redis_client,
-            shard_id=shard_id,
-            total_shards=total_shards,
-        )
+        super().__init__(market_definition, market_data_repo, stream_name)
+        self.instrument_repo = instrument_repo
         self.settings = settings
         self.subscription_scope = subscription_scope.lower()
+        self.redis_client = redis_client
+        self.system_state_repo = system_state_repo
+        self.universe_state_key = universe_state_key
+
         self.ws_connection_url = self.market_def.ws_base_url
-        self._ws: websockets.WebSocketClientProtocol | None = None
+        self._ws: Optional[websockets.WebSocketClientProtocol] = None
         self._connected = asyncio.Event()
 
         if self.subscription_scope == "private" and (not settings.client_id or not settings.client_secret):
             raise ValueError("Deribit private scope requires client_id and client_secret.")
-
+        if self.subscription_scope == "public" and (not system_state_repo or not universe_state_key):
+             raise ValueError("Deribit public scope requires system_state_repo and universe_state_key.")
+    
     async def _get_channels_from_universe(self, universe: List[str]) -> Set[str]:
         """
         Maps canonical universe symbols to Deribit's public trade channel names
         by dynamically looking up the correct instrument name from the database.
         """
-        # REFACTOR: Removed all hardcoded logic.
+
         my_targets = set()
         for symbol in universe:
             # Look up the perpetual futures instrument for the given canonical symbol.

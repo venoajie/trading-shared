@@ -1,11 +1,9 @@
-
 # src/trading_shared/exchanges/websockets/binance.py
 
 # --- Built Ins ---
 import asyncio
-import random
 from collections import deque
-from typing import AsyncGenerator, Dict, List, Set
+from typing import AsyncGenerator, Optional, List, Set
 
 # --- Installed ---
 import orjson
@@ -24,41 +22,33 @@ from .base import AbstractWsClient
 from trading_engine_core.models import MarketDefinition, StreamMessage
 
 
-class BinanceWsClient(AbstractWsClient):
-    """
-    A self-managing, sharded WebSocket client for Binance. It autonomously polls the
-    active universe, manages its own subscriptions, and handles reconnections.
-    """
 
+class BinanceWsClient(AbstractWsClient):
+    """A self-managing, sharded WebSocket client for Binance."""
     def __init__(
         self,
         market_definition: MarketDefinition,
         market_data_repo: MarketDataRepository,
-        instrument_repo: InstrumentRepository,
+        instrument_repo: InstrumentRepository, # Add instrument_repo for consistency
         system_state_repo: SystemStateRepository,
         stream_name: str,
         universe_state_key: str,
-        redis_client: CustomRedisClient,
         settings: ExchangeSettings,
         shard_id: int,
         total_shards: int,
     ):
-        super().__init__(
-            market_definition=market_definition,
-            market_data_repo=market_data_repo,
-            instrument_repo=instrument_repo,
-            system_state_repo=system_state_repo,
-            stream_name=stream_name,
-            universe_state_key=universe_state_key,
-            redis_client=redis_client,
-            shard_id=shard_id,
-            total_shards=total_shards,
-        )
+        super().__init__(market_definition, market_data_repo, stream_name)
+        self.instrument_repo = instrument_repo
+        self.system_state_repo = system_state_repo
+        self.universe_state_key = universe_state_key
         self.settings = settings
+        self.shard_id = shard_id
+        self.total_shards = total_shards
+        
         self.ws_connection_url = self.market_def.ws_base_url
-        self._ws: websockets.WebSocketClientProtocol | None = None
+        self._ws: Optional[websockets.WebSocketClientProtocol] = None
         self._connected = asyncio.Event()
-
+        
     def _get_channels_from_universe(self, universe: List[str]) -> Set[str]:
         """
         Filters the canonical universe for this client's specific shard and
@@ -66,7 +56,7 @@ class BinanceWsClient(AbstractWsClient):
         """
         my_targets = set()
         for i, symbol in enumerate(sorted(universe)):
-            # FIX: Add defensive filter to exclude leveraged tokens, which do not have @trade streams.
+            # Add defensive filter to exclude leveraged tokens, which do not have @trade streams.
             # This prevents the 1008 Policy Violation error.
             if "UP" in symbol or "DOWN" in symbol:
                 continue
@@ -156,7 +146,6 @@ class BinanceWsClient(AbstractWsClient):
         reconnect_attempts = 0
         while self._is_running.is_set():
             try:
-                # FIX: Use asyncio.gather to properly propagate exceptions from tasks.
                 subscription_task = asyncio.create_task(self._maintain_subscriptions())
                 message_task = asyncio.create_task(self._process_message_batch())
                 await asyncio.gather(subscription_task, message_task)
