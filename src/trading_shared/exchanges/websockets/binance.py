@@ -53,7 +53,7 @@ class BinanceWsClient(AbstractWsClient):
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
         self._connected = asyncio.Event()
         
-    def _get_channels_from_universe(self, universe: List[str]) -> Set[str]:
+    async def _get_channels_from_universe(self, universe: List[str]) -> Set[str]:
         """
         Filters the canonical universe for this client's specific shard and
         maps the symbols to Binance's required channel name format.

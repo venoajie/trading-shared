@@ -1,7 +1,7 @@
 # src/trading_shared/repositories/instrument_repository.py
 
 # --- Built Ins  ---
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 # --- Installed  ---
 import asyncpg
@@ -21,6 +21,22 @@ class InstrumentRepository:
     async def fetch_by_exchange(self, exchange_name: str) -> List[asyncpg.Record]:
         query = "SELECT * FROM v_instruments WHERE exchange = $1"
         return await self._db.fetch(query, exchange_name)
+
+    async def find_instrument_by_name_and_kind(
+        self, exchange: str, canonical_name: str, instrument_kind: str
+    ) -> Optional[asyncpg.Record]:
+        """
+        Finds a specific instrument record based on its canonical name and kind.
+        e.g., Find the 'perpetual' instrument for the canonical name 'BTCUSDT'.
+        """
+        query = """
+            SELECT * FROM v_instruments
+            WHERE exchange = $1
+            AND instrument_name = $2
+            AND instrument_kind = $3
+            LIMIT 1;
+        """
+        return await self._db.fetch_row(query, exchange, canonical_name, instrument_kind)
 
     async def bulk_upsert(self, instruments: List[Dict[str, Any]], exchange_name: str):
         if not instruments:
