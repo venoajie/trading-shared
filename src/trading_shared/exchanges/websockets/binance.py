@@ -31,7 +31,6 @@ class BinanceWsClient(AbstractWsClient):
         market_data_repo: MarketDataRepository,
         instrument_repo: InstrumentRepository,
         system_state_repo: SystemStateRepository,
-        stream_name: str,
         universe_state_key: str,
         settings: ExchangeSettings,
         shard_id: int,
@@ -40,7 +39,6 @@ class BinanceWsClient(AbstractWsClient):
         super().__init__(
             market_definition,
             market_data_repo,
-            stream_name,
             shard_id=shard_id,
             total_shards=total_shards,
         )
