@@ -64,39 +64,34 @@ class DeribitWsClient(AbstractWsClient):
         published by the strategist service, adhering to the architecture.
         """
         if not universe:
-            log.warning(f"[{self.exchange_name}] Received an empty universe; no channels to subscribe.")
             return set()
 
         log.debug(f"[{self.exchange_name}] Building subscription list from a universe of {len(universe)} symbols.")
         
-        # The canonical universe provides symbols like 'BTCUSDT'. For Deribit, we need to map this
-        # back to the specific instrument name like 'BTC-PERPETUAL'. We use the instrument
-        # repository as a lookup table for this mapping.
-        
-        # 1. Fetch all Deribit instruments once to create a lookup map.
+        # 1. Fetch all Deribit instruments to create a lookup map.
         all_deribit_instruments = await self.instrument_repo.fetch_by_exchange(self.exchange_name)
-        
-        # 2. Create a map from a normalized base asset (e.g., 'BTC') to the perpetual instrument name.
+        if not all_deribit_instruments:
+            log.warning(f"[{self.exchange_name}] Instrument repository returned no instruments. Cannot map universe.")
+            return set()
+
+        # 2. Map from a canonical BASE_ASSET to the perpetual instrument name.
         base_asset_to_perp_map = {
-            instrument.get("base_asset"): instrument.get("instrument_name")
+            str(instrument.get("base_asset")).upper(): instrument.get("instrument_name")
             for instrument in all_deribit_instruments
             if instrument.get("instrument_kind") == "perpetual"
         }
 
-        # 3. Iterate through the canonical universe and find the matching Deribit instrument.
+        # 3. Iterate the canonical universe and perform the lookup.
         my_targets = set()
         for symbol in universe:
-            # The canonical universe symbol is typically BASE+QUOTE (e.g., 'BTCUSDT')
-            # We need to find the base asset to perform the lookup.
-            # This logic assumes a common quote asset like USDT, which is consistent with universe rules.
-            # A more robust solution might involve a shared utility for parsing symbols.
-            base_asset = symbol.replace("USDT", "") 
-            
+            # A simple utility to extract the base asset would be ideal here,
+            # but for now we assume a common quote asset per the universe rules.
+            base_asset = symbol.replace("USDT", "").upper()
             deribit_instrument = base_asset_to_perp_map.get(base_asset)
             if deribit_instrument:
                 my_targets.add(f"trades.{deribit_instrument}.raw")
 
-        log.info(f"[{self.exchange_name}] Mapped universe to {len(my_targets)} perpetual instruments for subscription.")
+        log.info(f"[{self.exchange_name}] Mapped universe to {len(my_targets)} perpetuals for subscription.")
         return my_targets
     
     async def _send_rpc(self, method: str, params: dict):

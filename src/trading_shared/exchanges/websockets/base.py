@@ -15,31 +15,23 @@ from trading_engine_core.models import StreamMessage, MarketDefinition
 
 
 class AbstractWsClient(ABC):
-    """Abstract base class for exchange-specific WebSocket clients."""
-
     def __init__(
         self,
         market_definition: MarketDefinition,
         market_data_repo: MarketDataRepository,
-        stream_name: str,
         shard_id: int = 0,
         total_shards: int = 1,
     ):
-        """
-        The constructor only accepts dependencies that are
-        guaranteed to be used by ALL implementations. Exchange-specific
-        dependencies are handled by the subclass constructors.
-        """
         self.market_def = market_definition
         self.exchange_name = self.market_def.exchange
+        self.stream_name = self.market_def.output_stream_name
         self.market_data_repo = market_data_repo
-        self.stream_name = stream_name
         self.shard_id = shard_id
         self.total_shards = total_shards
 
-        if not stream_name:
-            raise ValueError(f"[{self.exchange_name}] 'stream_name' must be provided.")
-
+        if not self.stream_name:
+            raise ValueError(f"[{self.exchange_name}] 'output_stream_name' must be provided in MarketDefinition.")
+        
         self._active_channels: Set[str] = set()
         self._is_running = asyncio.Event()
 

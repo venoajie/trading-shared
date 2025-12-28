@@ -71,25 +71,27 @@ class BinanceWsClient(AbstractWsClient):
         return my_targets
 
     async def _send_request(self, method: str, params: List[str]):
-        """Safely sends a subscription or unsubscription request to the WebSocket."""
+        """Safely sends a subscription request, now with chunking."""
         await self._connected.wait()
         if not self._ws or not params:
             return
 
-        try:
-            request_id = int(asyncio.get_running_loop().time() * 1000)
-            payload = {"method": method.upper(), "params": params, "id": request_id}
-            log.debug(f"[{self.market_def.market_id}] Sending WS request: {payload}")
-            await self._ws.send(orjson.dumps(payload))
-        except websockets.exceptions.ConnectionClosed:
-            log.warning(
-                f"[{self.market_def.market_id}] Failed to send request: Connection is closed."
-            )
-        except Exception as e:
-            log.error(
-                f"[{self.market_def.market_id}] Unhandled error sending request: {e}"
-            )
+        # Binance subscription limit is not officially documented but 100-200 is a safe chunk size.
+        param_chunks = self._chunk_list(params, 100)
 
+        for chunk in param_chunks:
+            try:
+                request_id = int(asyncio.get_running_loop().time() * 1000)
+                payload = {"method": method.upper(), "params": chunk, "id": request_id}
+                log.debug(f"[{self.market_def.market_id}] Sending WS request chunk: {len(chunk)} params")
+                await self._ws.send(orjson.dumps(payload))
+                await asyncio.sleep(0.1) # Small delay to avoid rate limiting
+            except websockets.exceptions.ConnectionClosed:
+                log.warning(f"[{self.market_def.market_id}] Failed to send request chunk: Connection closed.")
+                break # Stop sending if connection drops
+            except Exception as e:
+                log.error(f"[{self.market_def.market_id}] Unhandled error sending request chunk: {e}")
+    
     async def _send_subscribe(self, channels: List[str]):
         await self._send_request("SUBSCRIBE", channels)
 
