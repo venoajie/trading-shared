@@ -59,15 +59,17 @@ class BinanceWsClient(AbstractWsClient):
         maps the symbols to Binance's required channel name format.
         """
         my_targets = set()
-        for i, symbol in enumerate(sorted(universe)):
-            # Add defensive filter to exclude leveraged tokens, which do not have @trade streams.
-            # This prevents the 1008 Policy Violation error.
-            if "UP" in symbol or "DOWN" in symbol:
-                continue
+        
+        valid_symbols = [
+            symbol for symbol in universe 
+            if "UP" not in symbol and "DOWN" not in symbol
+        ]
 
+        for i, symbol in enumerate(sorted(valid_symbols)):
             if i % self.total_shards == self.shard_id:
                 my_targets.add(f"{symbol.lower()}@trade")
         return my_targets
+        
 
     async def _send_request(self, method: str, params: List[str]):
         """Safely sends a subscription or unsubscription request to the WebSocket."""

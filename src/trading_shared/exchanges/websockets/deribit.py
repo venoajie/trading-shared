@@ -66,19 +66,24 @@ class DeribitWsClient(AbstractWsClient):
         Maps canonical universe symbols to Deribit's public trade channel names
         by dynamically looking up the correct instrument name from the database.
         """
-
         my_targets = set()
-        for symbol in universe:
-            # Look up the perpetual futures instrument for the given canonical symbol.
-            instrument = await self.instrument_repo.find_instrument_by_name_and_kind(
+        # Create a list of tasks to run the DB lookups concurrently for performance.
+        tasks = [
+            self.instrument_repo.find_instrument_by_name_and_kind(
                 exchange=self.exchange_name,
                 canonical_name=symbol,
                 instrument_kind="perpetual"
             )
+            for symbol in universe
+        ]
+        
+        results = await asyncio.gather(*tasks)
+
+        for i, instrument in enumerate(results):
             if instrument:
-                # Use the actual instrument name from the database for the subscription.
                 my_targets.add(f"trades.{instrument['instrument_name']}.raw")
             else:
+                symbol = universe[i]
                 log.warning(f"[{self.exchange_name}] Could not find a perpetual instrument for '{symbol}' in the database. Cannot subscribe.")
         return my_targets
     

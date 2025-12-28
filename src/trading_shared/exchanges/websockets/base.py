@@ -52,7 +52,7 @@ class AbstractWsClient(ABC):
         async def _update():
             try:
                 universe = await self.system_state_repo.get_active_universe(self.universe_state_key)
-                needed_channels = self._get_channels_from_universe(universe)
+                needed_channels = await self._get_channels_from_universe(universe)
 
                 if needed_channels != self._active_channels:
                     to_add = needed_channels - self._active_channels
@@ -66,7 +66,7 @@ class AbstractWsClient(ABC):
                     self._active_channels = needed_channels
                     log.info(f"[{self.market_def.market_id}] Subscription state updated: {len(self._active_channels)} channels active.")
             except Exception as e:
-                log.error(f"[{self.market_def.market_id}] Error during subscription update: {e}")
+                log.error(f"[{self.market_def.market_id}] Error during subscription update: {e}", exc_info=True)
 
         await _update()
 
@@ -79,7 +79,7 @@ class AbstractWsClient(ABC):
                 break
 
     @abstractmethod
-    def _get_channels_from_universe(self, universe: List[str]) -> Set[str]:
+    async def _get_channels_from_universe(self, universe: List[str]) -> Set[str]:
         """Maps canonical universe symbols to exchange-specific channel names for this shard."""
         pass
 
