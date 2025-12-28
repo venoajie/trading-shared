@@ -59,31 +59,46 @@ class DeribitWsClient(AbstractWsClient):
 
     async def _get_channels_from_universe(self, universe: List[str]) -> Set[str]:
         """
-        REFACTORED: Ignores the (potentially contaminated) universe parameter.
-        Builds a subscription list by querying the database directly for all
-        perpetual instruments belonging to the Deribit exchange. This makes
-        the client self-sufficient and architecturally robust.
+        REFACTORED: Correctly maps the canonical universe symbols to Deribit's
+        specific channel names. This method now correctly consumes the state
+        published by the strategist service, adhering to the architecture.
         """
-        log.debug(f"[{self.exchange_name}] Building subscription list from database.")
+        if not universe:
+            log.warning(f"[{self.exchange_name}] Received an empty universe; no channels to subscribe.")
+            return set()
+
+        log.debug(f"[{self.exchange_name}] Building subscription list from a universe of {len(universe)} symbols.")
+        
+        # The canonical universe provides symbols like 'BTCUSDT'. For Deribit, we need to map this
+        # back to the specific instrument name like 'BTC-PERPETUAL'. We use the instrument
+        # repository as a lookup table for this mapping.
+        
+        # 1. Fetch all Deribit instruments once to create a lookup map.
+        all_deribit_instruments = await self.instrument_repo.fetch_by_exchange(self.exchange_name)
+        
+        # 2. Create a map from a normalized base asset (e.g., 'BTC') to the perpetual instrument name.
+        base_asset_to_perp_map = {
+            instrument.get("base_asset"): instrument.get("instrument_name")
+            for instrument in all_deribit_instruments
+            if instrument.get("instrument_kind") == "perpetual"
+        }
+
+        # 3. Iterate through the canonical universe and find the matching Deribit instrument.
         my_targets = set()
-        try:
-            # Fetch all instruments specifically for the 'deribit' exchange.
-            deribit_instruments = await self.instrument_repo.fetch_by_exchange(self.exchange_name)
+        for symbol in universe:
+            # The canonical universe symbol is typically BASE+QUOTE (e.g., 'BTCUSDT')
+            # We need to find the base asset to perform the lookup.
+            # This logic assumes a common quote asset like USDT, which is consistent with universe rules.
+            # A more robust solution might involve a shared utility for parsing symbols.
+            base_asset = symbol.replace("USDT", "") 
             
-            for instrument in deribit_instruments:
-                # Filter for perpetual futures only.
-                if instrument.get("instrument_kind") == "perpetual":
-                    instrument_name = instrument.get("instrument_name")
-                    if instrument_name:
-                        my_targets.add(f"trades.{instrument_name}.raw")
+            deribit_instrument = base_asset_to_perp_map.get(base_asset)
+            if deribit_instrument:
+                my_targets.add(f"trades.{deribit_instrument}.raw")
 
-            log.info(f"[{self.exchange_name}] Identified {len(my_targets)} perpetual instruments for subscription.")
-        except Exception:
-            log.exception(f"[{self.exchange_name}] Failed to build subscription list from database.")
-
+        log.info(f"[{self.exchange_name}] Mapped universe to {len(my_targets)} perpetual instruments for subscription.")
         return my_targets
-
-
+    
     async def _send_rpc(self, method: str, params: dict):
         """Safely sends a JSON-RPC formatted request to the WebSocket."""
         await self._connected.wait()
