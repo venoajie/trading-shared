@@ -21,15 +21,14 @@ from .base import AbstractWsClient
 # --- Shared Library Imports ---
 from trading_engine_core.models import MarketDefinition, StreamMessage
 
-
-
 class BinanceWsClient(AbstractWsClient):
     """A self-managing, sharded WebSocket client for Binance."""
+        
     def __init__(
         self,
         market_definition: MarketDefinition,
         market_data_repo: MarketDataRepository,
-        instrument_repo: InstrumentRepository, # Add instrument_repo for consistency
+        instrument_repo: InstrumentRepository,
         system_state_repo: SystemStateRepository,
         stream_name: str,
         universe_state_key: str,
@@ -37,14 +36,19 @@ class BinanceWsClient(AbstractWsClient):
         shard_id: int,
         total_shards: int,
     ):
-        super().__init__(market_definition, market_data_repo, stream_name)
+        super().__init__(
+            market_definition,
+            market_data_repo,
+            stream_name,
+            shard_id=shard_id,
+            total_shards=total_shards,
+        )
         self.instrument_repo = instrument_repo
         self.system_state_repo = system_state_repo
         self.universe_state_key = universe_state_key
         self.settings = settings
-        self.shard_id = shard_id
-        self.total_shards = total_shards
-        
+        # Note: shard_id and total_shards are now set on the base class.
+
         self.ws_connection_url = self.market_def.ws_base_url
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
         self._connected = asyncio.Event()

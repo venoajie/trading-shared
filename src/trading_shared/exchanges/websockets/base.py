@@ -1,6 +1,5 @@
 # src/trading_shared/exchanges/websockets/base.py
 
-
 # --- Built Ins ---
 import asyncio
 from abc import ABC, abstractmethod
@@ -22,6 +21,8 @@ class AbstractWsClient(ABC):
         market_definition: MarketDefinition,
         market_data_repo: MarketDataRepository,
         stream_name: str,
+        shard_id: int = 0,
+        total_shards: int = 1,
     ):
         """
         The constructor only accepts dependencies that are
@@ -31,16 +32,18 @@ class AbstractWsClient(ABC):
         self.market_def = market_definition
         self.exchange_name = self.market_def.exchange
         self.market_data_repo = market_data_repo
+        self.stream_name = stream_name
+        self.shard_id = shard_id
+        self.total_shards = total_shards
 
         if not stream_name:
             raise ValueError(f"[{self.exchange_name}] 'stream_name' must be provided.")
-        self.stream_name = stream_name
 
         self._active_channels: Set[str] = set()
         self._is_running = asyncio.Event()
-        
+
     async def _maintain_subscriptions(self, poll_interval_s: int = 30):
-        if not self.system_state_repo or not self.universe_state_key:
+        if not hasattr(self, 'system_state_repo') or not self.system_state_repo or not self.universe_state_key:
             log.warning(f"[{self.market_def.market_id}] Dynamic subscriptions disabled (missing config).")
             return
 

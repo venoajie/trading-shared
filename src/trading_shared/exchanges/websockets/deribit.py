@@ -38,7 +38,13 @@ class DeribitWsClient(AbstractWsClient):
         system_state_repo: Optional[SystemStateRepository] = None,
         universe_state_key: Optional[str] = None,
     ):
-        super().__init__(market_definition, market_data_repo, stream_name)
+        super().__init__(
+            market_definition,
+            market_data_repo,
+            stream_name,
+            shard_id=0,
+            total_shards=1
+        )
         self.instrument_repo = instrument_repo
         self.settings = settings
         self.subscription_scope = subscription_scope.lower()
@@ -54,7 +60,7 @@ class DeribitWsClient(AbstractWsClient):
             raise ValueError("Deribit private scope requires client_id and client_secret.")
         if self.subscription_scope == "public" and (not system_state_repo or not universe_state_key):
              raise ValueError("Deribit public scope requires system_state_repo and universe_state_key.")
-    
+
     async def _get_channels_from_universe(self, universe: List[str]) -> Set[str]:
         """
         Maps canonical universe symbols to Deribit's public trade channel names
@@ -132,9 +138,10 @@ class DeribitWsClient(AbstractWsClient):
 
     async def _authenticate_and_subscribe(self):
         """Handles the authentication flow for private connections."""
+
         auth_params = {
             "grant_type": "client_credentials",
-            "client_id": self.settings.client_id.get_secret_value(),
+            "client_id": self.settings.client_id,  # Passed as a plain string
             "client_secret": self.settings.client_secret.get_secret_value(),
         }
         await self._send_rpc("public/auth", auth_params)
