@@ -1,9 +1,8 @@
 # src/trading_shared/exchanges/websockets/binance.py
-
 # --- Built Ins ---
 import asyncio
-from collections import deque
-from typing import AsyncGenerator, Optional, List, Set
+import time
+from typing import AsyncGenerator, Dict, List, Optional, Set
 
 # --- Installed ---
 import orjson
@@ -11,7 +10,6 @@ import websockets
 from loguru import logger as log
 
 # --- Local Application Imports ---
-from ...clients.redis_client import CustomRedisClient
 from ...config.models import ExchangeSettings
 from ...repositories.instrument_repository import InstrumentRepository
 from ...repositories.market_data_repository import MarketDataRepository
@@ -23,7 +21,7 @@ from trading_engine_core.models import MarketDefinition, StreamMessage
 
 
 class BinanceWsClient(AbstractWsClient):
-    """A self-managing, sharded WebSocket client for Binance."""
+    """A self-managing, sharded WebSocket client for Binance public trade data."""
 
     def __init__(
         self,
@@ -51,157 +49,122 @@ class BinanceWsClient(AbstractWsClient):
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
         self._connected = asyncio.Event()
 
-    async def _get_channels_from_universe(self, universe: List[str]) -> Set[str]:
-
+    async def _get_channels_from_universe(self, universe: List[Dict[str, any]]) -> Set[str]:
+        """
+        FIX: Correctly parses the rich universe object to extract symbols.
+        This method now correctly consumes the state published by the strategist.
+        """
         my_targets = set()
-        
-        # Iterate through the rich universe objects.
         for instrument_data in universe:
-            # Filter for instruments belonging to this exchange.
+            # 1. Ensure the instrument belongs to this exchange.
             if instrument_data.get("exchange") == self.exchange_name:
-                # Directly use the spot symbol, ensuring contextual correctness.
-                spot_symbol = instrument_data.get("spot_symbol")
-                if spot_symbol and "UP" not in spot_symbol and "DOWN" not in spot_symbol:
-                    my_targets.add(spot_symbol)
-
-        # The sharding logic is now applied to a pre-filtered, contextually correct list.
-        sharded_targets = set()
-        for i, symbol in enumerate(sorted(list(my_targets))):
-            if i % self.total_shards == self.shard_id:
-                sharded_targets.add(f"{symbol.lower()}@trade")
+                # 2. Extract the simple string symbol from the rich object.
+                symbol = instrument_data.get("spot_symbol")
+                if symbol:
+                    my_targets.add(symbol)
         
-        return sharded_targets
-    
-    def _chunk_list(self, data: List[str], chunk_size: int) -> List[List[str]]:
-        """Helper to break a list into smaller chunks."""
-        if not data:
-            return []
-        return [data[i:i + chunk_size] for i in range(0, len(data), chunk_size)]
+        # 3. Apply sharding logic to the final list of symbols.
+        sharded_targets = {
+            symbol for i, symbol in enumerate(sorted(list(my_targets))) 
+            if i % self.total_shards == self.shard_id
+        }
 
-    async def _send_request(self, method: str, params: List[str]):
-        """Safely sends a subscription request, now with chunking."""
+        # 4. Format the symbols into valid Binance channel names.
+        return {f"{symbol.lower()}@trade" for symbol in sharded_targets}
+
+    async def _send_rpc(self, method: str, params: List[str]):
+        """Safely sends a JSON-RPC formatted request to the WebSocket."""
         await self._connected.wait()
-        if not self._ws or not params:
+        if not self._ws:
             return
 
-        param_chunks = self._chunk_list(params, 100)
-
-        for chunk in param_chunks:
-            try:
-                request_id = int(asyncio.get_running_loop().time() * 1000)
-                payload = {"method": method.upper(), "params": chunk, "id": request_id}
-                log.debug(f"[{self.market_def.market_id}] Sending WS request chunk: {len(chunk)} params")
-                await self._ws.send(orjson.dumps(payload))
-                await asyncio.sleep(0.1)
-            except websockets.exceptions.ConnectionClosed:
-                log.warning(f"[{self.market_def.market_id}] Failed to send request chunk: Connection closed.")
-                break
-            except Exception as e:
-                log.error(f"[{self.market_def.market_id}] Unhandled error sending request chunk: {e}")
+        try:
+            msg = {
+                "method": method.upper(),
+                "params": params,
+                "id": int(time.time() * 1000),
+            }
+            log.debug(f"[{self.market_def.market_id}] Sending RPC: {msg}")
+            await self._ws.send(orjson.dumps(msg))
+        except websockets.exceptions.ConnectionClosed:
+            log.warning(f"[{self.market_def.market_id}] Failed to send RPC: Connection closed.")
+        except Exception as e:
+            log.error(f"[{self.market_def.market_id}] Unhandled error sending RPC: {e}")
 
     async def _send_subscribe(self, channels: List[str]):
-        await self._send_request("SUBSCRIBE", channels)
+        await self._send_rpc("SUBSCRIBE", channels)
 
     async def _send_unsubscribe(self, channels: List[str]):
-        await self._send_request("UNSUBSCRIBE", channels)
+        await self._send_rpc("UNSUBSCRIBE", channels)
 
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
-        """
-        Manages the raw WebSocket connection lifecycle and yields parsed messages.
-        """
+        """Manages the raw WebSocket connection."""
         try:
-            async with websockets.connect(
-                self.ws_connection_url, ping_interval=20, ping_timeout=60
-            ) as ws:
+            url_path = "/stream?streams=" + "/".join(self._active_channels)
+            async with websockets.connect(self.ws_connection_url + url_path, ping_interval=180) as ws:
                 self._ws = ws
                 self._connected.set()
-                log.success(
-                    f"[{self.market_def.market_id}] WebSocket connection established."
-                )
-
-                if self._active_channels:
-                    log.info(
-                        f"[{self.market_def.market_id}] Re-subscribing to {len(self._active_channels)} active channels."
-                    )
-                    await self._send_subscribe(list(self._active_channels))
+                log.success(f"[{self.market_def.market_id}] WebSocket connection established.")
 
                 async for message in ws:
                     try:
-                        payload = orjson.loads(message)
-                        if "data" not in payload or "stream" not in payload:
-                            continue
-                        trade_data = payload["data"]
-                        symbol = trade_data.get("s")
-                        if not symbol:
-                            continue
-
-                        yield StreamMessage(
-                            exchange=self.exchange_name,
-                            channel=payload["stream"],
-                            timestamp=trade_data.get("T"),
-                            data={
-                                "symbol": symbol,
-                                "price": float(trade_data.get("p")),
-                                "quantity": float(trade_data.get("q")),
-                            },
-                        )
+                        data = orjson.loads(message)
+                        payload = data.get("data")
+                        if payload and data.get("stream"):
+                            yield StreamMessage(
+                                exchange=self.exchange_name,
+                                channel=data["stream"],
+                                timestamp=payload.get("T"),
+                                data=payload,
+                            )
                     except (orjson.JSONDecodeError, KeyError, TypeError) as e:
-                        log.error(
-                            f"[{self.market_def.market_id}] Error processing message: {e}"
-                        )
+                        log.error(f"[{self.market_def.market_id}] Error processing message: {e}")
         finally:
             self._ws = None
             self._connected.clear()
             log.warning(f"[{self.market_def.market_id}] WebSocket connection closed.")
 
     async def _process_message_batch(self):
-        """Inner loop that consumes from the `connect` generator and processes data."""
-        batch = deque()
+        """Inner loop to consume from the generator and write to Redis."""
         async for message in self.connect():
-            await self.market_data_repo.cache_ticker(
-                message.data["symbol"], message.data
+            await self.market_data_repo.add_messages_to_stream(
+                self.stream_name, [message]
             )
-            batch.append(message)
-            if len(batch) >= 100:
-                await self.market_data_repo.add_messages_to_stream(
-                    self.stream_name, list(batch)
-                )
-                batch.clear()
 
     async def process_messages(self):
-        """
-        The main public entry point and supervisor loop for this client.
-        """
+        """The main supervisor loop that manages dynamic subscriptions and the connection."""
         self._is_running.set()
         reconnect_attempts = 0
         while self._is_running.is_set():
             try:
-                subscription_task = asyncio.create_task(self._maintain_subscriptions())
-                message_task = asyncio.create_task(self._process_message_batch())
-                await asyncio.gather(subscription_task, message_task)
+                # The subscription manager and message processor now run concurrently.
+                # When _maintain_subscriptions changes state, the connect() method
+                # will be re-established by the supervisor loop.
+                sub_task = asyncio.create_task(self._maintain_subscriptions())
+                
+                while self._is_running.is_set():
+                    if not self._active_channels:
+                        log.info(f"[{self.market_def.market_id}] No active channels. Waiting for universe update...")
+                        await asyncio.sleep(5)
+                        continue
+                    
+                    await self._process_message_batch()
+
             except websockets.exceptions.ConnectionClosedError as e:
-                log.warning(
-                    f"[{self.market_def.market_id}] Connection closed with error: {e.code} {e.reason}"
-                )
+                log.warning(f"[{self.market_def.market_id}] Connection closed with error: {e.code} {e.reason}")
             except asyncio.CancelledError:
                 log.info(f"[{self.market_def.market_id}] Supervisor tasks cancelled.")
-                break  # Exit the loop cleanly on cancellation
+                break
             except Exception as e:
-                log.error(
-                    f"[{self.market_def.market_id}] Unhandled exception in supervisor: {e}",
-                    exc_info=True,
-                )
+                log.error(f"[{self.market_def.market_id}] Unhandled exception in supervisor: {e}", exc_info=True)
 
             if self._is_running.is_set():
                 reconnect_attempts += 1
                 delay = min(2**reconnect_attempts, 60)
-                log.info(
-                    f"[{self.market_def.market_id}] Supervisor restarting tasks in {delay}s (attempt {reconnect_attempts})..."
-                )
+                log.info(f"[{self.market_def.market_id}] Supervisor restarting in {delay}s (attempt {reconnect_attempts})...")
                 await asyncio.sleep(delay)
 
     async def close(self):
-        """Initiates a graceful shutdown of the client."""
         log.info(f"[{self.market_def.market_id}] Closing client...")
         self._is_running.clear()
         if self._ws:
