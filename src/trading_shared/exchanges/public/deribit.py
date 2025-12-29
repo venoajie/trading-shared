@@ -9,12 +9,12 @@ import aiohttp
 from loguru import logger as log
 
 # --- Shared Library Imports ---
-from .base import PublicExchangeClient
+from .base import PublicClient
 from ..trading.deribit_constants import ApiMethods
 from ...config.models import ExchangeSettings
 
 
-class DeribitPublicClient(PublicExchangeClient):
+class DeribitPublicClient(PublicClient):
     """
     Client for Deribit's public REST API endpoints.
     """

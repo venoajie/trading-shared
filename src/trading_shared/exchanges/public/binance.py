@@ -9,12 +9,12 @@ import aiohttp
 from loguru import logger as log
 
 # --- Shared Library Imports ---
-from .base import PublicExchangeClient
+from .base import PublicClient
 from .binance_constants import BinanceMarketType
 from ...config.models import ExchangeSettings
 
 
-class BinancePublicClient(PublicExchangeClient):
+class BinancePublicClient(PublicClient):
     """
     Client for Binance's public REST API endpoints.
     """
