@@ -17,7 +17,7 @@ class SystemStateRepository:
     def __init__(self, redis_client: CustomRedisClient):
         self.redis = redis_client
 
-    async def set_active_universe(self, universe: List[Dict[str, Any]], key: str, ttl_seconds: int):
+    async def set_active_universe(self, key: str, symbols: List, ttl_seconds: int):
         """
         Sets the canonical list of active instruments in the trading universe.
 
@@ -27,12 +27,15 @@ class SystemStateRepository:
             ttl_seconds: The time-to-live for the Redis key.
         """
         try:
-            payload = orjson.dumps(universe)
+            payload = orjson.dumps(symbols)
             await self.redis.set(key, payload, ex=ttl_seconds)
-            log.debug(f"Set rich universe state on key '{key}' with {len(universe)} instruments.")
+            log.debug(f"Set universe state for key '{key}' with {len(symbols)} symbols.")
         except Exception:
-            log.exception(f"Failed to set rich universe state for key '{key}'.")
-
+            log.exception(
+                f"Failed to set universe state. "
+                f"Attempted to write to key '{key}' with data of type '{type(symbols).__name__}'."
+            )
+            
     async def get_active_universe(self, key: str) -> List[str]:
         """
         Gets the canonical list of active instruments from a specified Redis key.
