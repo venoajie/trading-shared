@@ -4,7 +4,7 @@
 import asyncio
 import time
 from collections import deque
-from typing import AsyncGenerator, Dict, List, Optional, Set
+from typing import Any, AsyncGenerator, Dict, List, Optional, Set
 
 # --- Installed ---
 import orjson
@@ -55,24 +55,23 @@ class DeribitWsClient(AbstractWsClient):
         # Public scope no longer strictly requires these, as it can self-determine its subscriptions.
         # This check could be removed or demoted to a warning if dynamic universe is not used.
 
-    async def _get_channels_from_universe(self, universe: List[str]) -> Set[str]:
+    async def _get_channels_from_universe(self, universe: List[Dict[str, Any]]) -> Set[str]:
         """
-        Correctly maps the canonical universe symbols to Deribit's
-        specific channel names. This method now correctly consumes the state
-        published by the strategist service, adhering to the architecture.
+        Consumes the clean universe object. It now correctly
+        filters for instruments on this exchange and extracts the true perpetual symbol.
         """
-        my_targets = set()
+        my_targets: Set[str] = set()
         for instrument_data in universe:
-            # Filter for instruments that belong to this exchange.
-            if instrument_data.get("exchange") == self.exchange_name:
-                # Directly use the perpetual symbol if it exists.
+            # Filter for instruments where the 'perp' market is on this exchange.
+            if instrument_data.get("exchange_perp") == self.exchange_name:
                 perp_symbol = instrument_data.get("perp_symbol")
                 if perp_symbol:
+                    # Deribit's trade channel format is `trades.{instrument_name}.raw`
                     my_targets.add(f"trades.{perp_symbol}.raw")
 
-        log.info(f"[{self.exchange_name}] Mapped rich universe to {len(my_targets)} perpetuals for subscription.")
+        log.debug(f"[{self.exchange_name}] Mapped universe to {len(my_targets)} perpetuals for subscription.")
         return my_targets
-
+    
     async def _send_rpc(self, method: str, params: dict):
         """Safely sends a JSON-RPC formatted request to the WebSocket."""
         await self._connected.wait()

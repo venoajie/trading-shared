@@ -1,7 +1,8 @@
-# src/shared/trading_shared/repositories/system_state_repository.py
+
+# src/trading_shared/repositories/system_state_repository.py
 
 # --- Built Ins ---
-from typing import List, Any, Dict
+from typing import List, Any
 
 # --- Installed ---
 import orjson
@@ -17,42 +18,39 @@ class SystemStateRepository:
     def __init__(self, redis_client: CustomRedisClient):
         self.redis = redis_client
 
-    async def set_active_universe(self, key: str, symbols: List, ttl_seconds: int):
+    async def set_active_universe(self, key: str, universe_data: List[Any], ttl_seconds: int):
         """
-        Sets the canonical list of active instruments in the trading universe.
+        Sets the canonical trading universe state.
 
         Args:
             key: The specific Redis key to write to.
-            symbols: A list of instrument symbol strings.
+            universe_data: A list of dictionary objects representing the universe.
             ttl_seconds: The time-to-live for the Redis key.
         """
         try:
-            payload = orjson.dumps(symbols)
+            # Serialized to a JSON string (bytes) before setting.
+            payload = orjson.dumps(universe_data)
             await self.redis.set(key, payload, ex=ttl_seconds)
-            log.debug(f"Set universe state for key '{key}' with {len(symbols)} symbols.")
+            log.debug(f"Set universe state for key '{key}' with {len(universe_data)} instruments.")
         except Exception:
             log.exception(
                 f"Failed to set universe state. "
-                f"Attempted to write to key '{key}' with data of type '{type(symbols).__name__}'."
+                f"Attempted to write to key '{key}' with data of type '{type(universe_data).__name__}'."
             )
-            
-    async def get_active_universe(self, key: str) -> List[str]:
-        """
-        Gets the canonical list of active instruments from a specified Redis key.
 
-        Args:
-            key: The specific Redis key to read from.
+    async def get_active_universe(self, key: str) -> List[Any]:
+        """
+        Gets the canonical trading universe from a specified Redis key.
 
         Returns:
-            A list of instrument symbols, or an empty list on failure.
+            A list of dictionary objects, or an empty list on failure.
         """
         try:
             payload = await self.redis.get(key)
             if not payload:
-                log.warning(f"Rich universe state key '{key}' not found or is empty.")
+                log.warning(f"Universe state key '{key}' not found or is empty.")
                 return []
-            # The type hint is now accurate.
             return orjson.loads(payload)
         except Exception:
-            log.exception(f"Failed to get or parse rich universe state from key '{key}'.")
+            log.exception(f"Failed to get or parse universe state from key '{key}'.")
             return []
