@@ -3,8 +3,7 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any
 
-
-class PublicExchangeClient(ABC):
+class PublicClient(ABC):
     """
     An abstract base class defining the contract for all public-facing REST API clients.
     Any concrete implementation of this class must provide methods for fetching
@@ -28,10 +27,11 @@ class PublicExchangeClient(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def get_instruments(self, currencies: List[str]) -> List[Dict[str, Any]]:
+    async def get_instruments(self) -> List[Dict[str, Any]]:
         """
         Fetches all relevant instruments from the exchange.
-        Should return the raw instrument data, which will be transformed upstream.
+        This method is now simplified to fetch all instruments for a given market type
+        (e.g., all spot, all linear futures), which are then transformed and persisted.
         """
         raise NotImplementedError
 
