@@ -46,6 +46,7 @@ class BinanceWsClient(AbstractWsClient):
         self.settings = settings
         self.ws_connection_url = self.market_def.ws_base_url
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
+        self.shard_num_for_log = self.shard_id + 1
 
     async def _get_channels_from_universe(
         self, universe: List[Dict[str, any]]
@@ -83,19 +84,20 @@ class BinanceWsClient(AbstractWsClient):
             log.warning(f"[{self.market_def.market_id}] No channels to connect to.")
             return
 
-        url_path = "/stream?streams=" + "/".join(sorted(list(self._active_channels)))
+        url_path = "/stream?streams=" + "/".join(sorted(list(self._active_channels)))        
         log.info(
-            f"[{self.market_def.market_id}] Connecting to {len(self._active_channels)} streams."
+            f"[{self.market_def.market_id}_{self.shard_num_for_log}] Connecting to {len(self._active_channels)} streams."
         )
 
         try:
             async with websockets.connect(
                 self.ws_connection_url + url_path, ping_interval=180
             ) as ws:
-                self._ws = ws
+                self._ws = ws               
                 log.success(
-                    f"[{self.market_def.market_id}] WebSocket connection established."
+                    f"[{self.market_def.market_id}_{self.shard_num_for_log}] WebSocket connection established."
                 )
+                
                 async for message in ws:
                     try:
                         data = orjson.loads(message)
