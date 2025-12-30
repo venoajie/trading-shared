@@ -36,6 +36,7 @@ class AbstractWsClient(ABC):
 
         self._active_channels: Set[str] = set()
         self._is_running = asyncio.Event()
+        self._reconnect_event = asyncio.Event()
 
     async def _maintain_subscriptions(self, poll_interval_s: int = 30):
         if (
@@ -60,18 +61,13 @@ class AbstractWsClient(ABC):
                 needed_channels = await self._get_channels_from_universe(universe)
 
                 if needed_channels != self._active_channels:
-                    to_add = needed_channels - self._active_channels
-                    to_remove = self._active_channels - needed_channels
-
-                    if to_remove:
-                        await self._send_unsubscribe(list(to_remove))
-                    if to_add:
-                        await self._send_subscribe(list(to_add))
-
-                    self._active_channels = needed_channels
                     log.info(
-                        f"[{self.market_def.market_id}] Subscription state updated: {len(self._active_channels)} channels active."
+                        f"[{self.market_def.market_id}] Subscription change detected: "
+                        f"{len(self._active_channels)} -> {len(needed_channels)} channels."
                     )
+                    self._active_channels = needed_channels
+                    self._reconnect_event.set()
+
             except Exception as e:
                 log.error(
                     f"[{self.market_def.market_id}] Error during subscription update: {e}",
@@ -93,12 +89,14 @@ class AbstractWsClient(ABC):
         """Maps canonical universe symbols to exchange-specific channel names for this shard."""
         pass
 
-    @abstractmethod
+    # [REMOVED] @abstractmethod decorator. These methods are now optional.
     async def _send_subscribe(self, channels: List[str]):
+        # [MODIFIED] Provide a default no-op implementation.
         pass
 
-    @abstractmethod
+    # [REMOVED] @abstractmethod decorator. These methods are now optional.
     async def _send_unsubscribe(self, channels: List[str]):
+        # [MODIFIED] Provide a default no-op implementation.
         pass
 
     @abstractmethod
