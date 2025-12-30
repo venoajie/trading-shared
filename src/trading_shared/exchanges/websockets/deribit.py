@@ -24,6 +24,7 @@ from trading_engine_core.models import MarketDefinition, StreamMessage
 
 class DeribitWsClient(AbstractWsClient):
     """A dual-purpose, self-managing WebSocket client for Deribit."""
+
     def __init__(
         self,
         market_definition: MarketDefinition,
@@ -35,10 +36,7 @@ class DeribitWsClient(AbstractWsClient):
         universe_state_key: Optional[str] = None,
     ):
         super().__init__(
-            market_definition,
-            market_data_repo,
-            shard_id=0,
-            total_shards=1
+            market_definition, market_data_repo, shard_id=0, total_shards=1
         )
         self.instrument_repo = instrument_repo
         self.settings = settings
@@ -50,12 +48,18 @@ class DeribitWsClient(AbstractWsClient):
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
         self._connected = asyncio.Event()
 
-        if self.subscription_scope == "private" and (not settings.client_id or not settings.client_secret):
-            raise ValueError("Deribit private scope requires client_id and client_secret.")
+        if self.subscription_scope == "private" and (
+            not settings.client_id or not settings.client_secret
+        ):
+            raise ValueError(
+                "Deribit private scope requires client_id and client_secret."
+            )
         # Public scope no longer strictly requires these, as it can self-determine its subscriptions.
         # This check could be removed or demoted to a warning if dynamic universe is not used.
 
-    async def _get_channels_from_universe(self, universe: List[Dict[str, Any]]) -> Set[str]:
+    async def _get_channels_from_universe(
+        self, universe: List[Dict[str, Any]]
+    ) -> Set[str]:
         """
         Consumes the clean universe object. It now correctly
         filters for instruments on this exchange and extracts the true perpetual symbol.
@@ -69,9 +73,11 @@ class DeribitWsClient(AbstractWsClient):
                     # Deribit's trade channel format is `trades.{instrument_name}.raw`
                     my_targets.add(f"trades.{perp_symbol}.raw")
 
-        log.debug(f"[{self.exchange_name}] Mapped universe to {len(my_targets)} perpetuals for subscription.")
+        log.debug(
+            f"[{self.exchange_name}] Mapped universe to {len(my_targets)} perpetuals for subscription."
+        )
         return my_targets
-    
+
     async def _send_rpc(self, method: str, params: dict):
         """Safely sends a JSON-RPC formatted request to the WebSocket."""
         await self._connected.wait()

@@ -21,13 +21,18 @@ class BinancePublicClient(PublicClient):
 
     _SAFETY_FETCH_LIMIT = 50  # Max number of paginated calls for a single request
 
-    def __init__(self, settings: ExchangeSettings, http_session: aiohttp.ClientSession, exchange_name: str):
+    def __init__(
+        self,
+        settings: ExchangeSettings,
+        http_session: aiohttp.ClientSession,
+        exchange_name: str,
+    ):
         super().__init__()
         self.http_session = http_session
         self.spot_url = "https://api.binance.com/api/v3"
         self.linear_futures_url = "https://fapi.binance.com/fapi/v1"
         self.inverse_futures_url = "https://dapi.binance.com/dapi/v1"
-        self.exchange_name = exchange_name 
+        self.exchange_name = exchange_name
 
     def _get_api_url_for_instrument(self, instrument_name: str) -> str:
         """Determines the correct API base URL (spot or futures) for a given instrument."""

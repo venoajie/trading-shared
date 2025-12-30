@@ -1,4 +1,3 @@
-
 # src/trading_shared/notifications/telegram_client.py
 
 import asyncio
@@ -13,9 +12,12 @@ from tenacity import (
     retry_if_exception_type,
 )
 
+
 class TelegramDeliveryError(Exception):
     """Custom exception for failures after all retries."""
+
     pass
+
 
 class TelegramClient:
     """
@@ -62,8 +64,10 @@ class TelegramClient:
                     return
                 # Handle non-retryable configuration errors
                 if response.status in [401, 404]:
-                    raise ConnectionRefusedError("Telegram Bot Token is invalid or revoked.")
-                response.raise_for_status() # Raise for other client errors
+                    raise ConnectionRefusedError(
+                        "Telegram Bot Token is invalid or revoked."
+                    )
+                response.raise_for_status()  # Raise for other client errors
         except Exception as e:
             log.critical(f"Failed to verify Telegram token: {e}")
             raise
@@ -86,7 +90,13 @@ class TelegramClient:
         api_url = f"https://api.telegram.org/bot{self._token}/sendMessage"
         # Telegram MarkdownV2 requires escaping of special characters.
         # This is a transport-level concern.
-        escaped_text = text.replace("-", "\\-").replace(".", "\\.").replace("!", "\\!").replace("(", "\\(").replace(")", "\\)")
+        escaped_text = (
+            text.replace("-", "\\-")
+            .replace(".", "\\.")
+            .replace("!", "\\!")
+            .replace("(", "\\(")
+            .replace(")", "\\)")
+        )
 
         payload = {
             "chat_id": self._chat_id,
@@ -94,8 +104,10 @@ class TelegramClient:
             "parse_mode": parse_mode,
         }
         try:
-            async with self._session.post(api_url, json=payload, timeout=10) as response:
-                response.raise_for_status() # Raises for 4xx/5xx responses
+            async with self._session.post(
+                api_url, json=payload, timeout=10
+            ) as response:
+                response.raise_for_status()  # Raises for 4xx/5xx responses
                 log.debug("Successfully sent message to Telegram.")
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             log.warning(f"Telegram send failed, will retry. Error: {e}")
@@ -103,4 +115,6 @@ class TelegramClient:
         except Exception as e:
             log.error(f"Unhandled exception during Telegram send: {e}")
             # Wrap in our custom exception to signal terminal failure
-            raise TelegramDeliveryError(f"Failed to send message after retries: {e}") from e
+            raise TelegramDeliveryError(
+                f"Failed to send message after retries: {e}"
+            ) from e

@@ -49,7 +49,9 @@ class BinanceWsClient(AbstractWsClient):
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
         self._connected = asyncio.Event()
 
-    async def _get_channels_from_universe(self, universe: List[Dict[str, any]]) -> Set[str]:
+    async def _get_channels_from_universe(
+        self, universe: List[Dict[str, any]]
+    ) -> Set[str]:
         """
         FIX: Correctly parses the rich universe object to extract symbols.
         This method now correctly consumes the state published by the strategist.
@@ -62,10 +64,11 @@ class BinanceWsClient(AbstractWsClient):
                 symbol = instrument_data.get("spot_symbol")
                 if symbol:
                     my_targets.add(symbol)
-        
+
         # 3. Apply sharding logic to the final list of symbols.
         sharded_targets = {
-            symbol for i, symbol in enumerate(sorted(list(my_targets))) 
+            symbol
+            for i, symbol in enumerate(sorted(list(my_targets)))
             if i % self.total_shards == self.shard_id
         }
 
@@ -87,7 +90,9 @@ class BinanceWsClient(AbstractWsClient):
             log.debug(f"[{self.market_def.market_id}] Sending RPC: {msg}")
             await self._ws.send(orjson.dumps(msg))
         except websockets.exceptions.ConnectionClosed:
-            log.warning(f"[{self.market_def.market_id}] Failed to send RPC: Connection closed.")
+            log.warning(
+                f"[{self.market_def.market_id}] Failed to send RPC: Connection closed."
+            )
         except Exception as e:
             log.error(f"[{self.market_def.market_id}] Unhandled error sending RPC: {e}")
 
@@ -101,10 +106,14 @@ class BinanceWsClient(AbstractWsClient):
         """Manages the raw WebSocket connection."""
         try:
             url_path = "/stream?streams=" + "/".join(self._active_channels)
-            async with websockets.connect(self.ws_connection_url + url_path, ping_interval=180) as ws:
+            async with websockets.connect(
+                self.ws_connection_url + url_path, ping_interval=180
+            ) as ws:
                 self._ws = ws
                 self._connected.set()
-                log.success(f"[{self.market_def.market_id}] WebSocket connection established.")
+                log.success(
+                    f"[{self.market_def.market_id}] WebSocket connection established."
+                )
 
                 async for message in ws:
                     try:
@@ -118,7 +127,9 @@ class BinanceWsClient(AbstractWsClient):
                                 data=payload,
                             )
                     except (orjson.JSONDecodeError, KeyError, TypeError) as e:
-                        log.error(f"[{self.market_def.market_id}] Error processing message: {e}")
+                        log.error(
+                            f"[{self.market_def.market_id}] Error processing message: {e}"
+                        )
         finally:
             self._ws = None
             self._connected.clear()
@@ -141,27 +152,36 @@ class BinanceWsClient(AbstractWsClient):
                 # When _maintain_subscriptions changes state, the connect() method
                 # will be re-established by the supervisor loop.
                 sub_task = asyncio.create_task(self._maintain_subscriptions())
-                
+
                 while self._is_running.is_set():
                     if not self._active_channels:
-                        log.info(f"[{self.market_def.market_id}] No active channels. Waiting for universe update...")
+                        log.info(
+                            f"[{self.market_def.market_id}] No active channels. Waiting for universe update..."
+                        )
                         await asyncio.sleep(5)
                         continue
-                    
+
                     await self._process_message_batch()
 
             except websockets.exceptions.ConnectionClosedError as e:
-                log.warning(f"[{self.market_def.market_id}] Connection closed with error: {e.code} {e.reason}")
+                log.warning(
+                    f"[{self.market_def.market_id}] Connection closed with error: {e.code} {e.reason}"
+                )
             except asyncio.CancelledError:
                 log.info(f"[{self.market_def.market_id}] Supervisor tasks cancelled.")
                 break
             except Exception as e:
-                log.error(f"[{self.market_def.market_id}] Unhandled exception in supervisor: {e}", exc_info=True)
+                log.error(
+                    f"[{self.market_def.market_id}] Unhandled exception in supervisor: {e}",
+                    exc_info=True,
+                )
 
             if self._is_running.is_set():
                 reconnect_attempts += 1
                 delay = min(2**reconnect_attempts, 60)
-                log.info(f"[{self.market_def.market_id}] Supervisor restarting in {delay}s (attempt {reconnect_attempts})...")
+                log.info(
+                    f"[{self.market_def.market_id}] Supervisor restarting in {delay}s (attempt {reconnect_attempts})..."
+                )
                 await asyncio.sleep(delay)
 
     async def close(self):

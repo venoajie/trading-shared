@@ -17,9 +17,9 @@ CLIENT_MAP = {
     "binance": BinancePublicClient,
 }
 
+
 def get_all_public_clients(
-    configs: Dict[str, ExchangeSettings],
-    http_session: aiohttp.ClientSession
+    configs: Dict[str, ExchangeSettings], http_session: aiohttp.ClientSession
 ) -> List[PublicClient]:
     """
     Factory function to instantiate all configured public exchange clients.
@@ -35,11 +35,9 @@ def get_all_public_clients(
             client = ClientClass(
                 settings=settings,
                 http_session=http_session,
-                exchange_name=exchange_name  
+                exchange_name=exchange_name,
             )
             clients.append(client)
         except Exception as e:
-            log.error(
-                f"Failed to instantiate public client for '{exchange_name}': {e}"
-            )
+            log.error(f"Failed to instantiate public client for '{exchange_name}': {e}")
     return clients

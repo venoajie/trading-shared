@@ -1,4 +1,3 @@
-
 # src/trading_shared/repositories/system_state_repository.py
 
 # --- Built Ins ---
@@ -18,7 +17,9 @@ class SystemStateRepository:
     def __init__(self, redis_client: CustomRedisClient):
         self.redis = redis_client
 
-    async def set_active_universe(self, key: str, universe_data: List[Any], ttl_seconds: int):
+    async def set_active_universe(
+        self, key: str, universe_data: List[Any], ttl_seconds: int
+    ):
         """
         Sets the canonical trading universe state.
 
@@ -31,7 +32,9 @@ class SystemStateRepository:
             # Serialized to a JSON string (bytes) before setting.
             payload = orjson.dumps(universe_data)
             await self.redis.set(key, payload, ex=ttl_seconds)
-            log.debug(f"Set universe state for key '{key}' with {len(universe_data)} instruments.")
+            log.debug(
+                f"Set universe state for key '{key}' with {len(universe_data)} instruments."
+            )
         except Exception:
             log.exception(
                 f"Failed to set universe state. "

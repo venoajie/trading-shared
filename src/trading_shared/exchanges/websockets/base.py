@@ -30,8 +30,10 @@ class AbstractWsClient(ABC):
         self.total_shards = total_shards
 
         if not self.stream_name:
-            raise ValueError(f"[{self.exchange_name}] 'output_stream_name' must be provided in MarketDefinition.")
-        
+            raise ValueError(
+                f"[{self.exchange_name}] 'output_stream_name' must be provided in MarketDefinition."
+            )
+
         self._active_channels: Set[str] = set()
         self._is_running = asyncio.Event()
 
