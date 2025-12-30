@@ -70,24 +70,39 @@ class DeribitWsClient(AbstractWsClient):
         except websockets.exceptions.ConnectionClosed:
             log.warning(f"[{self.exchange_name}] Failed to send RPC: Connection closed.")
 
+
+    async def _send_subscribe(self, channels: List[str]):
+        """Implements the subscription abstract method."""
+        if self.subscription_scope == "public":
+            await self._send_rpc("public/subscribe", {"channels": channels})
+        elif self.subscription_scope == "private":
+            await self._send_rpc("private/subscribe", {"channels": channels})
+
+    async def _send_unsubscribe(self, channels: List[str]):
+        """Implements the unsubscription abstract method."""
+        if self.subscription_scope == "public":
+            await self._send_rpc("public/unsubscribe", {"channels": channels})
+        elif self.subscription_scope == "private":
+            await self._send_rpc("private/unsubscribe", {"channels": channels})
+
     async def _handle_subscriptions(self):
-        """Handles authentication and subscription logic based on scope."""
+        """
+        [MODIFIED] This method now uses the newly implemented contract methods for clarity,
+        though it could also call _send_rpc directly. This is a stylistic choice for consistency.
+        """
         if self.subscription_scope == "private":
-            # Authenticate
             auth_params = {
                 "grant_type": "client_credentials",
                 "client_id": self.settings.client_id,
                 "client_secret": self.settings.client_secret.get_secret_value(),
             }
             await self._send_rpc("public/auth", auth_params)
-            # Subscribe to static private channels
             private_channels = ["user.changes.any.any.raw"]
-            await self._send_rpc("private/subscribe", {"channels": private_channels})
+            await self._send_subscribe(private_channels)
             log.info(f"[{self.exchange_name}] Authenticated and subscribed to private channels.")
         
         elif self.subscription_scope == "public" and self._active_channels:
-            # Subscribe to dynamic public channels
-            await self._send_rpc("public/subscribe", {"channels": list(self._active_channels)})
+            await self._send_subscribe(list(self._active_channels))
             log.info(f"[{self.exchange_name}] Subscribed to {len(self._active_channels)} public channels.")
 
 
