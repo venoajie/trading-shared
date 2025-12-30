@@ -1,7 +1,7 @@
 # src/trading_shared/exchanges/websockets/binance.py
+
 # --- Built Ins ---
 import asyncio
-import time
 from typing import AsyncGenerator, Dict, List, Optional, Set
 
 # --- Installed ---
@@ -44,77 +44,58 @@ class BinanceWsClient(AbstractWsClient):
         self.system_state_repo = system_state_repo
         self.universe_state_key = universe_state_key
         self.settings = settings
-
         self.ws_connection_url = self.market_def.ws_base_url
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
-        self._connected = asyncio.Event()
 
     async def _get_channels_from_universe(
         self, universe: List[Dict[str, any]]
     ) -> Set[str]:
         """
-        FIX: Correctly parses the rich universe object to extract symbols.
-        This method now correctly consumes the state published by the strategist.
+        [FIXED] Correctly parses the rich universe object to extract symbols
+        for this client's specific shard.
         """
         my_targets = set()
-        for instrument_data in universe:
-            # 1. Ensure the instrument belongs to this exchange.
-            if instrument_data.get("exchange") == self.exchange_name:
-                # 2. Extract the simple string symbol from the rich object.
-                symbol = instrument_data.get("spot_symbol")
-                if symbol:
+        for asset_pair in universe:
+            # Check both spot and perp exchanges to match this client's market definition
+            if asset_pair.get("exchange_spot") == self.exchange_name:
+                if symbol := asset_pair.get("spot_symbol"):
+                    my_targets.add(symbol)
+            if asset_pair.get("exchange_perp") == self.exchange_name:
+                if symbol := asset_pair.get("perp_symbol"):
                     my_targets.add(symbol)
 
-        # 3. Apply sharding logic to the final list of symbols.
         sharded_targets = {
             symbol
             for i, symbol in enumerate(sorted(list(my_targets)))
             if i % self.total_shards == self.shard_id
         }
-
-        # 4. Format the symbols into valid Binance channel names.
         return {f"{symbol.lower()}@trade" for symbol in sharded_targets}
 
-    async def _send_rpc(self, method: str, params: List[str]):
-        """Safely sends a JSON-RPC formatted request to the WebSocket."""
-        await self._connected.wait()
-        if not self._ws:
-            return
-
-        try:
-            msg = {
-                "method": method.upper(),
-                "params": params,
-                "id": int(time.time() * 1000),
-            }
-            log.debug(f"[{self.market_def.market_id}] Sending RPC: {msg}")
-            await self._ws.send(orjson.dumps(msg))
-        except websockets.exceptions.ConnectionClosed:
-            log.warning(
-                f"[{self.market_def.market_id}] Failed to send RPC: Connection closed."
-            )
-        except Exception as e:
-            log.error(f"[{self.market_def.market_id}] Unhandled error sending RPC: {e}")
-
-    async def _send_subscribe(self, channels: List[str]):
-        await self._send_rpc("SUBSCRIBE", channels)
-
-    async def _send_unsubscribe(self, channels: List[str]):
-        await self._send_rpc("UNSUBSCRIBE", channels)
+    # [REMOVED] _send_rpc, _send_subscribe, _send_unsubscribe methods are incorrect
+    # for this Binance API and have been removed.
 
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
-        """Manages the raw WebSocket connection."""
+        """
+        [REFACTORED] Manages a single, finite connection based on the current
+        active channels. Exits upon disconnection.
+        """
+        if not self._active_channels:
+            log.warning(f"[{self.market_def.market_id}] No channels to connect to.")
+            return
+
+        url_path = "/stream?streams=" + "/".join(sorted(list(self._active_channels)))
+        log.info(
+            f"[{self.market_def.market_id}] Connecting to {len(self._active_channels)} streams."
+        )
+
         try:
-            url_path = "/stream?streams=" + "/".join(self._active_channels)
             async with websockets.connect(
                 self.ws_connection_url + url_path, ping_interval=180
             ) as ws:
                 self._ws = ws
-                self._connected.set()
                 log.success(
                     f"[{self.market_def.market_id}] WebSocket connection established."
                 )
-
                 async for message in ws:
                     try:
                         data = orjson.loads(message)
@@ -126,67 +107,63 @@ class BinanceWsClient(AbstractWsClient):
                                 timestamp=payload.get("T"),
                                 data=payload,
                             )
-                    except (orjson.JSONDecodeError, KeyError, TypeError) as e:
-                        log.error(
-                            f"[{self.market_def.market_id}] Error processing message: {e}"
-                        )
+                    except (orjson.JSONDecodeError, KeyError, TypeError):
+                        log.warning("Failed to decode or parse Binance message.")
         finally:
             self._ws = None
-            self._connected.clear()
             log.warning(f"[{self.market_def.market_id}] WebSocket connection closed.")
 
     async def _process_message_batch(self):
         """Inner loop to consume from the generator and write to Redis."""
-        async for message in self.connect():
-            await self.market_data_repo.add_messages_to_stream(
-                self.stream_name, [message]
-            )
+        try:
+            async for message in self.connect():
+                await self.market_data_repo.add_messages_to_stream(
+                    self.stream_name, [message]
+                )
+        except asyncio.CancelledError:
+            pass # Normal shutdown
+        except Exception:
+            log.exception(f"[{self.market_def.market_id}] Unhandled error in message batch processor.")
 
     async def process_messages(self):
-        """The main supervisor loop that manages dynamic subscriptions and the connection."""
+        """
+        [REFACTORED] The main supervisor loop that manages dynamic subscriptions
+        and the connection lifecycle.
+        """
         self._is_running.set()
         reconnect_attempts = 0
+        subscription_task = asyncio.create_task(self._maintain_subscriptions())
+
         while self._is_running.is_set():
             try:
-                # The subscription manager and message processor now run concurrently.
-                # When _maintain_subscriptions changes state, the connect() method
-                # will be re-established by the supervisor loop.
-                sub_task = asyncio.create_task(self._maintain_subscriptions())
+                # This loop now waits for a subscription change or a disconnect.
+                # It will block here on startup until the first universe sync is complete.
+                await self._reconnect_event.wait()
+                self._reconnect_event.clear()
 
-                while self._is_running.is_set():
-                    if not self._active_channels:
-                        log.info(
-                            f"[{self.market_def.market_id}] No active channels. Waiting for universe update..."
-                        )
-                        await asyncio.sleep(5)
-                        continue
+                # Start a new processing task with the updated channels.
+                batch_task = asyncio.create_task(self._process_message_batch())
+                await batch_task # Awaits until the connection is lost.
 
-                    await self._process_message_batch()
-
-            except websockets.exceptions.ConnectionClosedError as e:
-                log.warning(
-                    f"[{self.market_def.market_id}] Connection closed with error: {e.code} {e.reason}"
-                )
+                reconnect_attempts = 0  # Reset attempts on clean disconnect
             except asyncio.CancelledError:
-                log.info(f"[{self.market_def.market_id}] Supervisor tasks cancelled.")
                 break
-            except Exception as e:
-                log.error(
-                    f"[{self.market_def.market_id}] Unhandled exception in supervisor: {e}",
-                    exc_info=True,
-                )
+            except Exception:
+                log.exception(f"[{self.market_def.market_id}] Supervisor error.")
 
             if self._is_running.is_set():
                 reconnect_attempts += 1
                 delay = min(2**reconnect_attempts, 60)
-                log.info(
-                    f"[{self.market_def.market_id}] Supervisor restarting in {delay}s (attempt {reconnect_attempts})..."
-                )
+                log.info(f"[{self.market_def.market_id}] Reconnecting in {delay}s...")
                 await asyncio.sleep(delay)
+                self._reconnect_event.set() # Trigger an immediate reconnect attempt
+
+        subscription_task.cancel()
+        log.info(f"[{self.market_def.market_id}] Supervisor loop has shut down.")
 
     async def close(self):
-        log.info(f"[{self.market_def.market_id}] Closing client...")
+        log.warning(f"[{self.market_def.market_id}] Closing client...")
         self._is_running.clear()
+        self._reconnect_event.set() # Unblock the main loop so it can exit
         if self._ws:
             await self._ws.close()
-        log.info(f"[{self.market_def.market_id}] Client closed.")
