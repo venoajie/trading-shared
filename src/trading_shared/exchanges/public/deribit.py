@@ -21,13 +21,14 @@ class DeribitPublicClient(PublicClient):
 
     _request_id = 0
 
-    def __init__(self, settings: ExchangeSettings, http_session: aiohttp.ClientSession):
+    def __init__(self, settings: ExchangeSettings, http_session: aiohttp.ClientSession, exchange_name: str):
         super().__init__()
         if not settings.rest_url:
             raise ValueError("Deribit rest_url not configured.")
         self.base_url = settings.rest_url
         self.http_session = http_session
-
+        self.exchange_name = exchange_name
+        
     async def _make_request(self, method: str, params: Dict[str, Any]) -> Dict:
         """Helper to make a JSON-RPC request to the Deribit API."""
         self._request_id += 1

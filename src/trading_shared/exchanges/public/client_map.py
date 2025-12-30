@@ -31,8 +31,12 @@ def get_all_public_clients(
             log.warning(f"No public client class found for exchange: {exchange_name}")
             continue
         try:
-            # Pass the http_session to the client constructor.
-            client = ClientClass(settings=settings, http_session=http_session)
+            # Pass the http_session and exchange_name to the client constructor.
+            client = ClientClass(
+                settings=settings,
+                http_session=http_session,
+                exchange_name=exchange_name  
+            )
             clients.append(client)
         except Exception as e:
             log.error(
