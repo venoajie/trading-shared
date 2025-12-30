@@ -368,33 +368,45 @@ class CustomRedisClient:
         group_name: str,
         consumer_name: str,
         count: int = 250,
-        block: int = 2000,
+        block: int = 5000,
     ) -> list:
         try:
-
-            async def command(pool: aioredis.Redis):
+            async def command(pool: aioredis.Redis) -> list:
                 try:
+                    # The response is a list containing one stream's data, or empty on timeout.
+                    # e.g., [[b'stream_name', [(b'id', {...}), ...]]]
                     response = await pool.xreadgroup(
                         groupname=group_name,
                         consumername=consumer_name,
-                        streams={stream_name: ">"},
+                        streams={stream_name: ">"}, # ">" means new messages only
                         count=count,
                         block=block,
                     )
-                    return response[0][1] if response else []
+                    
+                    # --- CRITICAL FIX LOGIC ---
+                    if not response:
+                        return [] # This is a normal timeout, no new messages.
+                    
+                    # Explicitly find our stream in the response for safety
+                    for stream_data in response:
+                        if stream_data[0].decode() == stream_name:
+                            return stream_data[1] # Return the list of messages
+                    
+                    return [] # Should not be reached if polling one stream, but safe.
+
                 except redis_exceptions.ResponseError as e:
                     if "NOGROUP" in str(e):
-                        log.warning(
-                            f"Consumer group '{group_name}' missing for "
-                            f"stream '{stream_name}', recreating..."
-                        )
-                        await self.ensure_consumer_group(stream_name, group_name)
+                        log.warning(f"Consumer group '{group_name}' not found for stream '{stream_name}', recreating...")
+                        # This should be handled by ensure_consumer_group before calling,
+                        # but this is a safe fallback.
+                        await pool.xgroup_create(stream_name, group_name, id="0", mkstream=True)
                         return []
                     raise
 
-            return await self.execute_resiliently(command, "xreadgroup")
+            return await self.execute_resiliently(command, f"XREADGROUP on {stream_name}")
         except ConnectionError as e:
-            raise ConnectionError("Redis connection failed during XREADGROUP") from e
+            log.error(f"Redis connection lost while reading stream '{stream_name}'.")
+            raise  # Re-raise to allow the calling loop to handle reconnection pauses.
 
     async def acknowledge_message(
         self,
