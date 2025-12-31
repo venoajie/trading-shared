@@ -30,7 +30,7 @@ class SystemStateRepository:
             await self.redis.set(key, payload, ex=ttl_seconds)
             log.debug(
                 f"Set universe state for key '{key}' with {len(universe_data)} instruments. "
-                f"(Redis DB: {self.redis.connection_pool.connection_kwargs.get('db', 'unknown')})"
+                #f"(Redis DB: {self.redis.connection_pool.connection_kwargs.get('db', 'unknown')})"
             )
         except Exception:
             log.exception(
