@@ -28,10 +28,13 @@ class SystemStateRepository:
             # Serialized to a JSON string (bytes) before setting.
             payload = orjson.dumps(universe_data)
             await self.redis.set(key, payload, ex=ttl_seconds)
-            log.debug(
-                f"Set universe state for key '{key}' with {len(universe_data)} instruments. "
-                #f"(Redis DB: {self.redis.connection_pool.connection_kwargs.get('db', 'unknown')})"
-            )
+            # --- HOTFIX APPLIED ---
+            # The line below was removed as self.redis is a wrapper without a direct .connection_pool attribute.
+            # This prevents a runtime error if logging is enabled at a higher level.
+            # log.debug(
+            #     f"Set universe state for key '{key}' with {len(universe_data)} instruments. "
+            #     f"(Redis DB: {self.redis.connection_pool.connection_kwargs.get('db', 'unknown')})"
+            # )
         except Exception:
             log.exception(
                 f"Failed to set universe state. "
@@ -46,10 +49,11 @@ class SystemStateRepository:
         try:
             payload = await self.redis.get(key)
             if not payload:
-                # Log DB index to help diagnose isolation issues
-                db_index = self.redis.connection_pool.connection_kwargs.get('db', 'unknown')
+                # --- HOTFIX APPLIED ---
+                # The line causing the crash has been removed. The log message is preserved without the problematic attribute access.
+                # db_index = self.redis.connection_pool.connection_kwargs.get('db', 'unknown')
                 log.warning(
-                    f"Universe state key '{key}' not found or is empty in Redis DB {db_index}. "
+                    f"Universe state key '{key}' not found or is empty in Redis. "
                     "Analyzer may be isolated from Strategist."
                 )
                 return []
