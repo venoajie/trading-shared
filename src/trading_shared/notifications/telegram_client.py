@@ -15,7 +15,6 @@ from tenacity import (
 
 class TelegramDeliveryError(Exception):
     """Custom exception for failures after all retries."""
-
     pass
 
 
@@ -51,42 +50,47 @@ class TelegramClient:
             await client._verify_token()
         return client
 
+    async def _verify_token(self):
+        """
+        Performs a 'getMe' API call to verify the bot token.
+        Refactored to allow degraded startup on network timeout.
+        """
+        log.info("Verifying Telegram Bot Token...")
+        api_url = f"https://api.telegram.org/bot{self._token}/getMe"
+        try:
+            async with self._session.get(api_url, timeout=10) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    username = data.get("result", {}).get("username")
+                    log.success(f"Telegram token valid. Connected to bot: @{username}")
+                    return
+                
+                # Non-retryable auth errors still cause a crash as they indicate invalid secrets
+                if response.status in [401, 404]:
+                    raise ConnectionRefusedError(
+                        "Telegram Bot Token is invalid or revoked. Check secrets."
+                    )
+                response.raise_for_status()
 
-async def _verify_token(self):
-    """
-    Performs a 'getMe' API call to verify the bot token.
-    Refactored to allow degraded startup on network timeout.
-    """
-    log.info("Verifying Telegram Bot Token...")
-    api_url = f"https://api.telegram.org/bot{self._token}/getMe"
-    try:
-        async with self._session.get(api_url, timeout=10) as response:
-            if response.status == 200:
-                data = await response.json()
-                username = data.get("result", {}).get("username")
-                log.success(f"Telegram token valid. Connected to bot: @{username}")
-                return
-            
-            # Non-retryable auth errors still cause a crash as they indicate invalid secrets
-            if response.status in [401, 404]:
-                raise ConnectionRefusedError(
-                    "Telegram Bot Token is invalid or revoked. Check secrets."
-                )
-            response.raise_for_status()
-
-    except (aiohttp.ClientConnectorError, asyncio.TimeoutError) as e:
-        # Degraded mode allowance
-        log.critical(
-            f"TELEGRAM EGRESS BLOCKED: Timeout/Connection error during verification. "
-            f"The service will start in DEGRADED mode. Notifications will fail until egress is restored. "
-            f"Error: {e}"
-        )
-        # We do not raise the error here; we allow the service to continue.
-        return 
-    except Exception as e:
-        log.error(f"Unexpected error during Telegram token verification: {e}")
-        raise
+        except (aiohttp.ClientConnectorError, asyncio.TimeoutError) as e:
+            # Degraded mode allowance
+            log.critical(
+                f"TELEGRAM EGRESS BLOCKED: Timeout/Connection error during verification. "
+                f"The service will start in DEGRADED mode. Notifications will fail until egress is restored. "
+                f"Error: {e}"
+            )
+            # We do not raise the error here; we allow the service to continue.
+            return 
+        except Exception as e:
+            log.error(f"Unexpected error during Telegram token verification: {e}")
+            raise
     
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=5),
+        retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError)),
+        reraise=True,
+    )
     async def send_message(self, text: str, parse_mode: str = "MarkdownV2"):
         """
         Sends a message to the configured Telegram chat with retry logic.
