@@ -67,15 +67,17 @@ class MarketDataRepository:
 
     async def update_realtime_candle(
         self,
+        # --- FIX: Added 'exchange' parameter to fulfill the data contract ---
+        exchange: str,
         instrument_name: str,
         candle_data: dict,
     ):
         """
-        Updates the 'Live' in-flight candle in Redis.
+        [REFACTORED] Updates the 'Live' in-flight candle in Redis using the v2.0 data contract.
         Used by the Distributor for real-time analytics visibility.
         """
-        # Key format: cache:ohlc:live:<instrument_name>
-        key = f"cache:ohlc:live:{instrument_name}"
+        
+        key = f"market:cache:{exchange.lower()}:ohlc:live:{instrument_name.upper()}"
 
         # We use HSET with mapping to update fields atomically
         # We convert values to strings to ensure Redis compatibility
@@ -91,21 +93,26 @@ class MarketDataRepository:
             "updated_at": str(candle_data.get("updated_at", "")),
         }
 
-        # Fire and forget (don't wait for response to keep latency low)
-        # Note: In a strict async loop, we still await, but it's fast.
-        await self._redis.hset(name=key, mapping=mapping)
+        try:
+            pipe = await self._redis.pipeline()
+            # Use a pipeline for atomic HSET and EXPIRE operations
+            await pipe.hset(name=key, mapping=mapping)
+            # --- FIX: TTL updated to 70 seconds as per the spec ---
+            await pipe.expire(key, 70)
+            await pipe.execute()
+        except Exception:
+            log.exception(f"Failed to update live candle for key '{key}'")
 
-        # Set a TTL (e.g., 5 minutes) so stale data doesn't linger forever if the stream dies
-        await self._redis.expire(key, 300)
 
     async def get_realtime_candle(
         self,
+        exchange: str,
         instrument_name: str,
     ) -> Optional[Dict[str, Any]]:
         """
-        Retrieves the current in-flight candle from Redis.
+        [REFACTORED] Retrieves the current in-flight candle from Redis using the v2.0 data contract.
         """
-        key = f"cache:ohlc:live:{instrument_name}"
+        key = f"market:cache:{exchange.lower()}:ohlc:live:{instrument_name.upper()}"
         data = await self._redis.hgetall(key)
 
         if not data:
