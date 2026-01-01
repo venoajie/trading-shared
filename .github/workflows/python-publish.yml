@@ -41,7 +41,7 @@ jobs:
         env:
           PYTHONPATH: src
         run: |
-          pytest \
+          python -m pytest \
             --cov=src \
             --cov-report=xml \
             --cov-fail-under=90
