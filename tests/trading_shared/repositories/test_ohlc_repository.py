@@ -1,9 +1,10 @@
+
 # tests/trading_shared/repositories/test_ohlc_repository.py
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from unittest.mock import AsyncMock, MagicMock
 
 from trading_shared.repositories.ohlc_repository import OhlcRepository
 
@@ -24,8 +25,9 @@ def ohlc_repo(mock_postgres_client):
     return OhlcRepository(mock_postgres_client)
 
 
-@pytest.mark.asyncio
+# FIX: Remove class-level asyncio marker
 class TestOhlcRepository:
+
     @pytest.mark.parametrize(
         "res_str, expected_td",
         [
@@ -50,7 +52,10 @@ class TestOhlcRepository:
         with pytest.raises(ValueError, match="Unknown resolution format: 1M"):
             ohlc_repo._parse_resolution_to_timedelta("1M")
 
-    async def test_fetch_latest_timestamp_calls_db_correctly(self, ohlc_repo, mock_postgres_client):
+    @pytest.mark.asyncio
+    async def test_fetch_latest_timestamp_calls_db_correctly(
+        self, ohlc_repo, mock_postgres_client
+    ):
         # Arrange
         exchange = "binance"
         instrument = "BTCUSDT"
@@ -61,9 +66,14 @@ class TestOhlcRepository:
         await ohlc_repo.fetch_latest_timestamp(exchange, instrument, res_td)
 
         # Assert
-        mock_postgres_client.fetchrow.assert_awaited_once_with(expected_query, exchange, instrument, res_td)
+        mock_postgres_client.fetchrow.assert_awaited_once_with(
+            expected_query, exchange, instrument, res_td
+        )
 
-    async def test_fetch_for_instrument_calls_db_correctly(self, ohlc_repo, mock_postgres_client):
+    @pytest.mark.asyncio
+    async def test_fetch_for_instrument_calls_db_correctly(
+        self, ohlc_repo, mock_postgres_client
+    ):
         # Arrange
         exchange = "binance"
         instrument = "BTCUSDT"
@@ -76,9 +86,14 @@ class TestOhlcRepository:
         await ohlc_repo.fetch_for_instrument(exchange, instrument, res_str, limit)
 
         # Assert
-        mock_postgres_client.fetch.assert_awaited_once_with(expected_query, exchange, instrument, expected_td, limit)
+        mock_postgres_client.fetch.assert_awaited_once_with(
+            expected_query, exchange, instrument, expected_td, limit
+        )
 
-    async def test_bulk_upsert_prepares_records_and_calls_db(self, ohlc_repo, mock_postgres_client):
+    @pytest.mark.asyncio
+    async def test_bulk_upsert_prepares_records_and_calls_db(
+        self, ohlc_repo, mock_postgres_client
+    ):
         # Arrange
         now_ts = int(datetime.now(timezone.utc).timestamp() * 1000)
         candles = [
@@ -87,26 +102,15 @@ class TestOhlcRepository:
                 "instrument_name": "BTCUSDT",
                 "resolution": "1",
                 "tick": now_ts,
-                "open": 1.0,
-                "high": 2.0,
-                "low": 0.5,
-                "close": 1.5,
-                "volume": 100.0,
-                "open_interest": 50.0,
+                "open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5, "volume": 100.0,
+                "open_interest": 50.0
             }
         ]
-
+        
         expected_record_tuple = (
-            "binance",
-            "BTCUSDT",
-            timedelta(minutes=1),
+            "binance", "BTCUSDT", timedelta(minutes=1),
             datetime.fromtimestamp(now_ts / 1000, tz=timezone.utc),
-            1.0,
-            2.0,
-            0.5,
-            1.5,
-            100.0,
-            50.0,
+            1.0, 2.0, 0.5, 1.5, 100.0, 50.0
         )
         expected_query = "SELECT bulk_upsert_ohlc($1::ohlc_upsert_type[])"
 
@@ -114,9 +118,14 @@ class TestOhlcRepository:
         await ohlc_repo.bulk_upsert(candles)
 
         # Assert
-        mock_postgres_client.execute.assert_awaited_once_with(expected_query, [expected_record_tuple])
+        mock_postgres_client.execute.assert_awaited_once_with(
+            expected_query, [expected_record_tuple]
+        )
 
-    async def test_bulk_upsert_does_nothing_if_no_candles(self, ohlc_repo, mock_postgres_client):
+    @pytest.mark.asyncio
+    async def test_bulk_upsert_does_nothing_if_no_candles(
+        self, ohlc_repo, mock_postgres_client
+    ):
         # Arrange
         candles = []
 
