@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError, SecretStr
 from trading_shared.config.models import PostgresSettings, RedisSettings
 
+
 class TestPostgresSettings:
     """Tests the PostgresSettings Pydantic model."""
 
@@ -58,7 +59,9 @@ class TestPostgresSettings:
         )
         # urllib.parse.quote_plus should encode '@' to '%40', '#' to '%23', etc.
         expected_encoded_password = "p%40ssw%23rd%24123"
-        expected_dsn = f"postgresql://test_user:{expected_encoded_password}@localhost:5432/test_db"
+        expected_dsn = (
+            f"postgresql://test_user:{expected_encoded_password}@localhost:5432/test_db"
+        )
 
         # Act
         dsn = settings.dsn
@@ -79,7 +82,7 @@ class TestPostgresSettings:
         # Act & Assert
         with pytest.raises(ValidationError) as exc_info:
             PostgresSettings(**invalid_data)
-        
+
         assert "user" in str(exc_info.value)
 
 
@@ -91,7 +94,7 @@ class TestRedisSettings:
         valid_data = {
             "url": "redis://localhost:6379",
             "db": 0,
-            "password": "redis_password"
+            "password": "redis_password",
         }
 
         # Act
@@ -101,15 +104,12 @@ class TestRedisSettings:
         assert settings.url == "redis://localhost:6379"
         assert settings.db == 0
         assert settings.password.get_secret_value() == "redis_password"
-        assert settings.max_retries == 3 # Check default
+        assert settings.max_retries == 3  # Check default
 
     def test_password_is_optional(self):
         # Arrange
-        data_without_password = {
-            "url": "redis://localhost:6379",
-            "db": 1
-        }
-        
+        data_without_password = {"url": "redis://localhost:6379", "db": 1}
+
         # Act
         settings = RedisSettings(**data_without_password)
 
@@ -120,7 +120,7 @@ class TestRedisSettings:
         # Arrange
         invalid_data = {
             "url": "redis://localhost:6379",
-            "db": "not-an-integer" # Invalid type
+            "db": "not-an-integer",  # Invalid type
         }
 
         # Act & Assert

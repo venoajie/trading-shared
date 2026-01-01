@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from trading_shared.repositories.system_state_repository import SystemStateRepository
 
+
 @pytest.fixture
 def mock_redis_client():
     """Provides a mock CustomRedisClient instance."""
@@ -13,6 +14,7 @@ def mock_redis_client():
     client.get = AsyncMock(return_value=None)
     client.set = AsyncMock()
     return client
+
 
 @pytest.fixture
 def system_state_repo(mock_redis_client):
@@ -22,7 +24,6 @@ def system_state_repo(mock_redis_client):
 
 @pytest.mark.asyncio
 class TestSystemStateRepository:
-
     async def test_set_active_universe_serializes_and_calls_redis(
         self, system_state_repo, mock_redis_client
     ):

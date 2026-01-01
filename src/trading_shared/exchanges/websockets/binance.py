@@ -107,7 +107,6 @@ class BinanceWsClient(AbstractWsClient):
                         log.warning("Failed to decode or parse Binance message.")
 
         except websockets.exceptions.InvalidStatus as e:
-
             if e.response.status_code == 404:
                 log.critical(
                     f"[{self.market_def.market_id}_{self.shard_num_for_log}] 404 REJECTION. "
@@ -159,9 +158,7 @@ class BinanceWsClient(AbstractWsClient):
             if self._is_running.is_set():
                 reconnect_attempts += 1
                 delay = min(2**reconnect_attempts, 60)
-                log.info(
-                    f"[{self.market_def.market_id}] Reconnecting in {delay}s..."
-                )
+                log.info(f"[{self.market_def.market_id}] Reconnecting in {delay}s...")
                 await asyncio.sleep(delay)
                 self._reconnect_event.set()  # Trigger an immediate reconnect attempt
 

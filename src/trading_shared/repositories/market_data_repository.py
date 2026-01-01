@@ -76,7 +76,7 @@ class MarketDataRepository:
         [REFACTORED] Updates the 'Live' in-flight candle in Redis using the v2.0 data contract.
         Used by the Distributor for real-time analytics visibility.
         """
-        
+
         key = f"market:cache:{exchange.lower()}:ohlc:live:{instrument_name.upper()}"
 
         # We use HSET with mapping to update fields atomically
@@ -102,7 +102,6 @@ class MarketDataRepository:
             await pipe.execute()
         except Exception:
             log.exception(f"Failed to update live candle for key '{key}'")
-
 
     async def get_realtime_candle(
         self,

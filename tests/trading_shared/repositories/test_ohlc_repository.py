@@ -26,7 +26,6 @@ def ohlc_repo(mock_postgres_client):
 
 @pytest.mark.asyncio
 class TestOhlcRepository:
-
     @pytest.mark.parametrize(
         "res_str, expected_td",
         [
@@ -98,15 +97,26 @@ class TestOhlcRepository:
                 "instrument_name": "BTCUSDT",
                 "resolution": "1",
                 "tick": now_ts,
-                "open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5, "volume": 100.0,
-                "open_interest": 50.0
+                "open": 1.0,
+                "high": 2.0,
+                "low": 0.5,
+                "close": 1.5,
+                "volume": 100.0,
+                "open_interest": 50.0,
             }
         ]
-        
+
         expected_record_tuple = (
-            "binance", "BTCUSDT", timedelta(minutes=1),
+            "binance",
+            "BTCUSDT",
+            timedelta(minutes=1),
             datetime.fromtimestamp(now_ts / 1000, tz=timezone.utc),
-            1.0, 2.0, 0.5, 1.5, 100.0, 50.0
+            1.0,
+            2.0,
+            0.5,
+            1.5,
+            100.0,
+            50.0,
         )
         expected_query = "SELECT bulk_upsert_ohlc($1::ohlc_upsert_type[])"
 

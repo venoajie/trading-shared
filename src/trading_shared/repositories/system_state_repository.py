@@ -1,4 +1,3 @@
-
 # src/trading_shared/repositories/system_state_repository.py
 
 # --- Built Ins ---
@@ -61,7 +60,11 @@ class SystemStateRepository:
         except Exception as e:
             # Differentiate between connection errors, missing keys, and parsing errors
             if "WRONGTYPE" in str(e):
-                log.error(f"Data Type Collision on key '{key}'. Expected STRING, found other.")
+                log.error(
+                    f"Data Type Collision on key '{key}'. Expected STRING, found other."
+                )
             else:
-                log.exception(f"Failed to get or parse universe state from key '{key}'.")
+                log.exception(
+                    f"Failed to get or parse universe state from key '{key}'."
+                )
             return []

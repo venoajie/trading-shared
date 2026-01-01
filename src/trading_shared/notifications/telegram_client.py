@@ -15,6 +15,7 @@ from tenacity import (
 
 class TelegramDeliveryError(Exception):
     """Custom exception for failures after all retries."""
+
     pass
 
 
@@ -64,7 +65,7 @@ class TelegramClient:
                     username = data.get("result", {}).get("username")
                     log.success(f"Telegram token valid. Connected to bot: @{username}")
                     return
-                
+
                 # Non-retryable auth errors still cause a crash as they indicate invalid secrets
                 if response.status in [401, 404]:
                     raise ConnectionRefusedError(
@@ -80,11 +81,11 @@ class TelegramClient:
                 f"Error: {e}"
             )
             # We do not raise the error here; we allow the service to continue.
-            return 
+            return
         except Exception as e:
             log.error(f"Unexpected error during Telegram token verification: {e}")
             raise
-    
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=5),
