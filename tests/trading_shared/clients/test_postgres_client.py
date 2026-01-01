@@ -1,170 +1,194 @@
-# tests/trading_shared/clients/test_postgres_client.py
+
+# tests/trading_shared/clients/test_redis_client.py
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock, AsyncMock
 
-import asyncpg
 import pytest
 from pydantic import SecretStr
+import redis.asyncio as aioredis
+from redis.exceptions import ConnectionError as RedisConnectionError
 
-from trading_shared.clients.postgres_client import PostgresClient
-from trading_shared.config.models import PostgresSettings
+from trading_shared.clients.redis_client import CustomRedisClient
+from trading_shared.config.models import RedisSettings
 
 
 @pytest.fixture
-def postgres_settings():
-    """Provides a default PostgresSettings instance for tests."""
-    return PostgresSettings(
-        user="test",
-        password=SecretStr("test"),
-        host="localhost",
-        port=5432,
-        db="testdb",
+def redis_settings():
+    """Provides a default RedisSettings instance for tests."""
+    return RedisSettings(
+        url="redis://localhost",
+        db=0,
+        password=SecretStr("testpass"),
         max_retries=2,
         initial_retry_delay_s=0.01,
     )
 
 
 @pytest.fixture
-def mock_asyncpg_pool(mocker):
-    """Mocks the asyncpg.Pool object."""
-    mock_pool = MagicMock(spec=asyncpg.Pool)
-    mock_pool._closed = False
-    mock_conn = MagicMock(spec=asyncpg.Connection)
-    mock_conn.fetch = AsyncMock(return_value=[{"id": 1}])
-    mock_conn.fetchrow = AsyncMock(return_value={"id": 1})
-    mock_conn.fetchval = AsyncMock(return_value=1)
-    mock_conn.execute = AsyncMock(return_value="INSERT 1")
+def mock_aioredis(mocker):
+    """Mocks the redis.asyncio.Redis client object."""
+    mock_redis = MagicMock(spec=aioredis.Redis)
+    mock_redis.ping = AsyncMock(return_value=True)
+    mock_redis.close = AsyncMock()
+    mock_redis.get = AsyncMock(return_value=b'{"key":"value"}')
+    mock_redis.set = AsyncMock()
+    mock_redis.hgetall = AsyncMock(return_value={b"field": b"value"})
+    mock_redis.hset = AsyncMock()
+    mock_redis.xack = AsyncMock()
+    mock_redis.xreadgroup = AsyncMock(return_value=[
+        (b'test:stream', [(b'123-0', {b'data': b'{"val": 1}'})])
+    ])
 
-    mock_pool.acquire.return_value.__aenter__.return_value = mock_conn
-    return mock_pool
+    mock_pipeline = MagicMock(spec=aioredis.client.Pipeline)
+    mock_pipeline.execute = AsyncMock()
+    mock_pipeline.xadd = MagicMock()
+    mock_redis.pipeline = MagicMock(return_value=mock_pipeline)
+
+    return mock_redis
 
 
-@pytest.mark.asyncio
-class TestPostgresClient:
-    """Unit tests for the PostgresClient."""
+# --- FIX: The @pytest.mark.asyncio decorator has been removed from the class level ---
+class TestCustomRedisClient:
+    """Unit tests for the CustomRedisClient."""
 
-    async def test_ensure_pool_is_ready_creates_pool_if_none(self, postgres_settings, mocker, mock_asyncpg_pool):
+    # --- FIX: Decorator is now applied to each individual async test method ---
+    @pytest.mark.asyncio
+    async def test_get_client_creates_instance(self, redis_settings, mocker, mock_aioredis):
         # Arrange
-        mocker.patch("asyncpg.create_pool", new_callable=AsyncMock, return_value=mock_asyncpg_pool)
-        client = PostgresClient(postgres_settings)
+        mock_from_url = mocker.patch("redis.asyncio.from_url", return_value=mock_aioredis)
+        client = CustomRedisClient(redis_settings)
 
         # Act
-        pool = await client.ensure_pool_is_ready()
+        redis_conn = await client._get_client()
 
         # Assert
-        asyncpg.create_pool.assert_awaited_once()
-        assert pool is not None
-        assert pool == mock_asyncpg_pool
+        mock_from_url.assert_called_once_with(
+            "redis://localhost",
+            password="testpass",
+            db=0,
+            socket_connect_timeout=2,
+            decode_responses=False,
+        )
+        mock_aioredis.ping.assert_awaited_once()
+        assert redis_conn == mock_aioredis
 
-    async def test_ensure_pool_is_ready_returns_existing_pool(self, postgres_settings, mocker, mock_asyncpg_pool):
+    @pytest.mark.asyncio
+    async def test_execute_resiliently_retries_on_connection_error(
+        self, redis_settings, mocker, mock_aioredis
+    ):
         # Arrange
-        mocker.patch("asyncpg.create_pool", new_callable=AsyncMock, return_value=mock_asyncpg_pool)
-        client = PostgresClient(postgres_settings)
-        await client.ensure_pool_is_ready()
-        asyncpg.create_pool.reset_mock()
-
-        # Act
-        pool = await client.ensure_pool_is_ready()
-
-        # Assert
-        asyncpg.create_pool.assert_not_called()
-        assert pool == mock_asyncpg_pool
-
-    async def test_close_closes_and_clears_pool(self, postgres_settings, mocker, mock_asyncpg_pool):
-        # Arrange
-        mock_asyncpg_pool.close = AsyncMock()
-        mocker.patch("asyncpg.create_pool", new_callable=AsyncMock, return_value=mock_asyncpg_pool)
-        client = PostgresClient(postgres_settings)
-        await client.ensure_pool_is_ready()
-
-        # Act
-        await client.close()
-
-        # Assert
-        mock_asyncpg_pool.close.assert_awaited_once()
-        assert client._pool is None
-
-    async def test_fetch_executes_correctly(self, postgres_settings, mocker, mock_asyncpg_pool):
-        # Arrange
-        mocker.patch("asyncpg.create_pool", new_callable=AsyncMock, return_value=mock_asyncpg_pool)
-        client = PostgresClient(postgres_settings)
-        query = "SELECT * FROM test WHERE id = $1"
-        params = (1,)
-
-        # Act
-        result = await client.fetch(query, *params)
-
-        # Assert
-        mock_conn = mock_asyncpg_pool.acquire.return_value.__aenter__.return_value
-        mock_conn.fetch.assert_awaited_once_with(query, *params)
-        assert result == [{"id": 1}]
-
-    async def test_execute_resiliently_retries_on_connection_error(self, postgres_settings, mocker, mock_asyncpg_pool):
-        # Arrange
-        # FIX: Instantiate the exception to prevent IndexError during logging.
-        mock_error = asyncpg.PostgresConnectionError("Mock DB Connection Error")
-        mock_ensure_pool = mocker.patch.object(
-            PostgresClient,
-            "ensure_pool_is_ready",
+        mock_get_client = mocker.patch.object(
+            CustomRedisClient,
+            "_get_client",
             new_callable=AsyncMock,
-            side_effect=[mock_error, mock_asyncpg_pool],
+            side_effect=[RedisConnectionError("Mock connection failed"), mock_aioredis],
         )
         mocker.patch("asyncio.sleep", new_callable=AsyncMock)
-        client = PostgresClient(postgres_settings)
+        client = CustomRedisClient(redis_settings)
 
         # Act
-        result = await client.fetch("SELECT 1")
+        result = await client.get("some_key")
 
         # Assert
-        assert mock_ensure_pool.await_count == 2
-        assert mock_asyncpg_pool.acquire.call_count == 1
+        assert mock_get_client.await_count == 2
         assert asyncio.sleep.call_count == 1
-        assert result == [{"id": 1}]
+        assert result == b'{"key":"value"}'
+        mock_aioredis.get.assert_awaited_once_with("some_key")
 
-    async def test_execute_resiliently_fails_after_max_retries(self, postgres_settings, mocker):
+    @pytest.mark.asyncio
+    async def test_execute_resiliently_fails_after_max_retries(
+        self, redis_settings, mocker
+    ):
         # Arrange
-        # FIX: Instantiate the exception.
-        mock_error = asyncpg.PostgresConnectionError("Mock DB Connection Error")
-        mock_ensure_pool = mocker.patch.object(
-            PostgresClient,
-            "ensure_pool_is_ready",
+        mock_get_client = mocker.patch.object(
+            CustomRedisClient,
+            "_get_client",
             new_callable=AsyncMock,
-            side_effect=mock_error,
+            side_effect=RedisConnectionError("Mock connection failed"),
         )
         mocker.patch("asyncio.sleep", new_callable=AsyncMock)
-        client = PostgresClient(postgres_settings)
+        client = CustomRedisClient(redis_settings)
 
         # Act & Assert
-        expected_error_msg = "Failed to execute Postgres command 'fetch_SELECT' after retries."
+        expected_error_msg = "Failed to execute Redis command 'GET some_key' after retries."
         with pytest.raises(ConnectionError, match=expected_error_msg):
-            await client.fetch("SELECT 1")
+            await client.get("some_key")
 
-        assert mock_ensure_pool.await_count == 2
-        assert asyncio.sleep.call_count == 1
+        assert mock_get_client.await_count == 2
 
-    async def test_execute_parses_result_string(self, postgres_settings, mocker, mock_asyncpg_pool):
+    @pytest.mark.asyncio
+    async def test_xadd_bulk_chunks_messages(self, redis_settings, mocker, mock_aioredis):
         # Arrange
-        mocker.patch("asyncpg.create_pool", new_callable=AsyncMock, return_value=mock_asyncpg_pool)
-        client = PostgresClient(postgres_settings)
-        mock_conn = mock_asyncpg_pool.acquire.return_value.__aenter__.return_value
-        mock_conn.execute.return_value = "CUSTOM_COMMAND 123"
+        mocker.patch("redis.asyncio.from_url", return_value=mock_aioredis)
+        client = CustomRedisClient(redis_settings)
+        messages = [{"key": i} for i in range(501)]
 
         # Act
-        result = await client.execute("CUSTOM_COMMAND")
+        await client.xadd_bulk("test:stream", messages)
 
         # Assert
-        assert result == 123
+        mock_pipeline = mock_aioredis.pipeline.return_value
+        assert mock_pipeline.execute.await_count == 2
+        assert mock_pipeline.xadd.call_count == 501
 
-    async def test_execute_handles_no_count_in_result(self, postgres_settings, mocker, mock_asyncpg_pool):
+    @pytest.mark.asyncio
+    async def test_xadd_bulk_moves_to_dlq_on_final_failure(
+        self, redis_settings, mocker
+    ):
         # Arrange
-        mocker.patch("asyncpg.create_pool", new_callable=AsyncMock, return_value=mock_asyncpg_pool)
-        client = PostgresClient(postgres_settings)
-        mock_conn = mock_asyncpg_pool.acquire.return_value.__aenter__.return_value
-        mock_conn.execute.return_value = "OK"
+        mocker.patch.object(
+            CustomRedisClient,
+            "_get_client",
+            new_callable=AsyncMock,
+            side_effect=RedisConnectionError,
+        )
+        mocker.patch("asyncio.sleep", new_callable=AsyncMock)
+        client = CustomRedisClient(redis_settings)
+        mock_xadd_to_dlq = mocker.patch.object(client, 'xadd_to_dlq', new_callable=AsyncMock)
+        messages = [{"key": 1}]
+
+        # Act & Assert
+        with pytest.raises(ConnectionError):
+            await client.xadd_bulk("market:stream:test", messages)
+
+        mock_xadd_to_dlq.assert_awaited_once_with("market:stream:test", messages)
+
+    # --- This test is synchronous and correctly has NO decorator ---
+    def test_xadd_to_dlq_constructs_correct_name(self, redis_settings, mocker):
+        # Arrange
+        client = CustomRedisClient(redis_settings)
+        mocker.patch.object(client, 'execute_resiliently', new_callable=AsyncMock)
 
         # Act
-        result = await client.execute("VACUUM")
+        asyncio.run(client.xadd_to_dlq("market:stream:binance:trades", [{"key": 1}]))
 
         # Assert
-        assert result == 0
+        call_args = client.execute_resiliently.call_args
+        log_message = call_args[0][1]
+        assert "deadletter:queue:market:stream" in log_message
+
+    @pytest.mark.asyncio
+    async def test_read_stream_messages_parses_response(self, redis_settings, mocker, mock_aioredis):
+        # Arrange
+        mocker.patch("redis.asyncio.from_url", return_value=mock_aioredis)
+        client = CustomRedisClient(redis_settings)
+        
+        # Act
+        messages = await client.read_stream_messages("test:stream", "group", "consumer")
+        
+        # Assert
+        assert messages == [(b'123-0', {b'data': b'{"val": 1}'})]
+        
+    @pytest.mark.asyncio
+    async def test_read_stream_messages_handles_empty_response(self, redis_settings, mocker, mock_aioredis):
+        # Arrange
+        mock_aioredis.xreadgroup = AsyncMock(return_value=[])
+        mocker.patch("redis.asyncio.from_url", return_value=mock_aioredis)
+        client = CustomRedisClient(redis_settings)
+        
+        # Act
+        messages = await client.read_stream_messages("test:stream", "group", "consumer")
+        
+        # Assert
+        assert messages == []
