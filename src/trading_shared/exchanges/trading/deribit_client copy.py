@@ -2,14 +2,14 @@
 
 # --- Built Ins  ---
 import asyncio
-from typing import Dict, Any, Optional
 import time
 from functools import wraps
+from typing import Any
 
 # --- Installed  ---
 import aiohttp
-from loguru import logger as log
 import orjson
+from loguru import logger as log
 
 # --- Local Application Imports ---
 from ...config.models import ExchangeSettings
@@ -35,9 +35,9 @@ class DeribitTradingClient:
         self.client_secret = client_secret
         self._settings = settings
         self.exchange_name = "deribit"
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session: aiohttp.ClientSession | None = None
         self._base_url = "https://www.deribit.com/api/v2"
-        self._access_token: Optional[str] = None
+        self._access_token: str | None = None
         self._auth_lock = asyncio.Lock()
         log.info("Deribit API client initialized for production use.")
 
@@ -124,8 +124,8 @@ class DeribitTradingClient:
     async def _perform_request(
         self,
         method: str,
-        params: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
         """
         Internal helper to execute a single API request.
         This method is now the single point of failure and exception generation.
@@ -171,7 +171,7 @@ class DeribitTradingClient:
         currency: str,
         kind: str = "future",
         expired: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Fetches all instruments for a given currency and kind."""
         log.info(f"[API CALL] Fetching {kind} instruments for currency: {currency}")
 
@@ -186,7 +186,7 @@ class DeribitTradingClient:
         start_timestamp: int,
         end_timestamp: int,
         resolution: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Fetches OHLC data from the TradingView-compatible endpoint."""
         params = {
             "instrument_name": instrument_name,
@@ -202,14 +202,14 @@ class DeribitTradingClient:
     async def get_subaccounts_details(
         self,
         currency: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Fetches detailed subaccount information."""
         log.info(f"[API CALL] Fetching subaccount details for currency: {currency}")
         params = {"currency": currency, "with_open_orders": True}
         return await self._perform_request(ApiMethods.GET_SUBACCOUNTS_DETAILS, params)
 
     @_ensure_authenticated
-    async def cancel_order(self, order_id: str) -> Dict[str, Any]:
+    async def cancel_order(self, order_id: str) -> dict[str, Any]:
         log.info(f"[API CALL] Attempting to cancel order: {order_id}")
         return await self._perform_request(
             ApiMethods.CANCEL_ORDER, {"order_id": order_id}
@@ -218,8 +218,8 @@ class DeribitTradingClient:
     @_ensure_authenticated
     async def create_order(
         self,
-        params: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
         """Sends a real 'create order' request to the exchange."""
         # ... (implementation is the same, but calls _perform_request) ...
         side = params.get("side")
@@ -232,8 +232,8 @@ class DeribitTradingClient:
     @_ensure_authenticated
     async def create_oto_order(
         self,
-        params: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
         """
         Sends a request to create a paired OTO (One-Triggers-Other) order.
         """
@@ -271,7 +271,7 @@ class DeribitTradingClient:
     async def get_open_orders_by_currency(
         self,
         currency: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Fetches all open orders for a given currency."""
         log.info(f"[API CALL] Fetching open orders for currency: {currency}")
 
@@ -283,7 +283,7 @@ class DeribitTradingClient:
     async def get_account_summary(
         self,
         currency: str,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Fetches account summary, including equity. Unwraps the response object."""
         log.info(f"[API CALL] Fetching account summary for currency: {currency}")
 
@@ -306,7 +306,7 @@ class DeribitTradingClient:
         count: int = 1000,
         query: str = "trade",
         continuation: str = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Fetches the transaction log for a given period."""
         log.info(
             f"[API CALL] Fetching transaction log for {currency} from {start_timestamp} to {end_timestamp}"
@@ -330,7 +330,7 @@ class DeribitTradingClient:
     async def get_user_trades_by_order(
         self,
         order_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Fetches user trades for a specific order ID."""
         log.debug(f"[API CALL] Fetching trades for order_id: {order_id}")
 
@@ -341,8 +341,8 @@ class DeribitTradingClient:
     @_ensure_authenticated
     async def simulate_pme(
         self,
-        positions: Dict[str, float],
-    ) -> Dict[str, Any]:
+        positions: dict[str, float],
+    ) -> dict[str, Any]:
         """
         Calls the private/pme/simulate endpoint to get official margin calculations.
         """

@@ -1,7 +1,8 @@
 # tests/trading_shared/config/test_models.py
 
 import pytest
-from pydantic import ValidationError, SecretStr
+from pydantic import SecretStr, ValidationError
+
 from trading_shared.config.models import PostgresSettings, RedisSettings
 
 

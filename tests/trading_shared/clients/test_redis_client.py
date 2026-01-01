@@ -1,11 +1,11 @@
 # tests/trading_shared/clients/test_redis_client.py
 
 import asyncio
-from unittest.mock import MagicMock, AsyncMock, call
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from pydantic import SecretStr
 import redis.asyncio as aioredis
+from pydantic import SecretStr
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from trading_shared.clients.redis_client import CustomRedisClient

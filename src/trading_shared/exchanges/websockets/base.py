@@ -2,16 +2,16 @@
 
 # --- Built Ins ---
 import asyncio
-from abc import ABC, abstractmethod
-from typing import AsyncGenerator, List, Set
 import random
+from abc import ABC, abstractmethod
+from collections.abc import AsyncGenerator
 
 # --- Installed ---
 from loguru import logger as log
+from trading_engine_core.models import MarketDefinition, StreamMessage
 
 # --- Local Application Imports ---
 from ...repositories.market_data_repository import MarketDataRepository
-from trading_engine_core.models import StreamMessage, MarketDefinition
 
 
 class AbstractWsClient(ABC):
@@ -34,7 +34,7 @@ class AbstractWsClient(ABC):
                 f"[{self.exchange_name}] 'output_stream_name' must be provided in MarketDefinition."
             )
 
-        self._active_channels: Set[str] = set()
+        self._active_channels: set[str] = set()
         self._is_running = asyncio.Event()
         self._reconnect_event = asyncio.Event()
 
@@ -85,17 +85,17 @@ class AbstractWsClient(ABC):
                 break
 
     @abstractmethod
-    async def _get_channels_from_universe(self, universe: List[str]) -> Set[str]:
+    async def _get_channels_from_universe(self, universe: list[str]) -> set[str]:
         """Maps canonical universe symbols to exchange-specific channel names for this shard."""
         pass
 
     # [REMOVED] @abstractmethod decorator. These methods are now optional.
-    async def _send_subscribe(self, channels: List[str]):
+    async def _send_subscribe(self, channels: list[str]):
         # [MODIFIED] Provide a default no-op implementation.
         pass
 
     # [REMOVED] @abstractmethod decorator. These methods are now optional.
-    async def _send_unsubscribe(self, channels: List[str]):
+    async def _send_unsubscribe(self, channels: list[str]):
         # [MODIFIED] Provide a default no-op implementation.
         pass
 

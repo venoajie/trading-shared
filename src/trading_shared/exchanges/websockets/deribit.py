@@ -3,12 +3,16 @@
 # --- Built Ins ---
 import asyncio
 import time
-from typing import Any, AsyncGenerator, Dict, List, Optional, Set
+from collections.abc import AsyncGenerator
+from typing import Any
 
 # --- Installed ---
 import orjson
 import websockets
 from loguru import logger as log
+
+# --- Shared Library Imports ---
+from trading_engine_core.models import MarketDefinition, StreamMessage
 
 # --- Local Application Imports ---
 from ...config.models import ExchangeSettings
@@ -16,9 +20,6 @@ from ...repositories.instrument_repository import InstrumentRepository
 from ...repositories.market_data_repository import MarketDataRepository
 from ...repositories.system_state_repository import SystemStateRepository
 from .base import AbstractWsClient
-
-# --- Shared Library Imports ---
-from trading_engine_core.models import MarketDefinition, StreamMessage
 
 
 class DeribitWsClient(AbstractWsClient):
@@ -31,8 +32,8 @@ class DeribitWsClient(AbstractWsClient):
         instrument_repo: InstrumentRepository,
         settings: ExchangeSettings,
         subscription_scope: str = "public",
-        system_state_repo: Optional[SystemStateRepository] = None,
-        universe_state_key: Optional[str] = None,
+        system_state_repo: SystemStateRepository | None = None,
+        universe_state_key: str | None = None,
     ):
         super().__init__(
             market_definition, market_data_repo, shard_id=0, total_shards=1
@@ -43,7 +44,7 @@ class DeribitWsClient(AbstractWsClient):
         self.system_state_repo = system_state_repo
         self.universe_state_key = universe_state_key
         self.ws_connection_url = self.market_def.ws_base_url
-        self._ws: Optional[websockets.WebSocketClientProtocol] = None
+        self._ws: websockets.WebSocketClientProtocol | None = None
 
         if self.subscription_scope == "private" and (
             not settings.client_id or not settings.client_secret
@@ -53,10 +54,10 @@ class DeribitWsClient(AbstractWsClient):
             )
 
     async def _get_channels_from_universe(
-        self, universe: List[Dict[str, Any]]
-    ) -> Set[str]:
+        self, universe: list[dict[str, Any]]
+    ) -> set[str]:
         """Consumes the clean universe object and filters for Deribit perpetuals."""
-        my_targets: Set[str] = set()
+        my_targets: set[str] = set()
         for instrument_data in universe:
             if instrument_data.get("exchange_perp") == self.exchange_name:
                 if perp_symbol := instrument_data.get("perp_symbol"):
@@ -80,14 +81,14 @@ class DeribitWsClient(AbstractWsClient):
                 f"[{self.exchange_name}] Failed to send RPC: Connection closed."
             )
 
-    async def _send_subscribe(self, channels: List[str]):
+    async def _send_subscribe(self, channels: list[str]):
         """Implements the subscription abstract method."""
         if self.subscription_scope == "public":
             await self._send_rpc("public/subscribe", {"channels": channels})
         elif self.subscription_scope == "private":
             await self._send_rpc("private/subscribe", {"channels": channels})
 
-    async def _send_unsubscribe(self, channels: List[str]):
+    async def _send_unsubscribe(self, channels: list[str]):
         """Implements the unsubscription abstract method."""
         if self.subscription_scope == "public":
             await self._send_rpc("public/unsubscribe", {"channels": channels})

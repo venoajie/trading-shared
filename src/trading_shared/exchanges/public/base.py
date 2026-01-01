@@ -1,7 +1,7 @@
 # src/trading_shared/exchanges/public/base.py
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any
+from typing import Any
 
 
 class PublicClient(ABC):
@@ -28,7 +28,7 @@ class PublicClient(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def get_instruments(self) -> List[Dict[str, Any]]:
+    async def get_instruments(self) -> list[dict[str, Any]]:
         """
         Fetches all relevant instruments from the exchange.
         This method is now simplified to fetch all instruments for a given market type
@@ -43,7 +43,7 @@ class PublicClient(ABC):
         resolution: str,
         start_timestamp_ms: int,
         limit: int = 1000,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Fetches OHLC (k-line) data for a symbol. This method is expected to handle
         any necessary API pagination to retrieve a complete dataset from the start time.

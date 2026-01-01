@@ -2,12 +2,15 @@
 
 # --- Built Ins ---
 import asyncio
-from typing import AsyncGenerator, Dict, List, Optional, Set
+from collections.abc import AsyncGenerator
 
 # --- Installed ---
 import orjson
 import websockets
 from loguru import logger as log
+
+# --- Shared Library Imports ---
+from trading_engine_core.models import MarketDefinition, StreamMessage
 
 # --- Local Application Imports ---
 from ...config.models import ExchangeSettings
@@ -15,9 +18,6 @@ from ...repositories.instrument_repository import InstrumentRepository
 from ...repositories.market_data_repository import MarketDataRepository
 from ...repositories.system_state_repository import SystemStateRepository
 from .base import AbstractWsClient
-
-# --- Shared Library Imports ---
-from trading_engine_core.models import MarketDefinition, StreamMessage
 
 
 class BinanceWsClient(AbstractWsClient):
@@ -45,12 +45,12 @@ class BinanceWsClient(AbstractWsClient):
         self.universe_state_key = universe_state_key
         self.settings = settings
         self.ws_connection_url = self.market_def.ws_base_url
-        self._ws: Optional[websockets.WebSocketClientProtocol] = None
+        self._ws: websockets.WebSocketClientProtocol | None = None
         self.shard_num_for_log = self.shard_id + 1
 
     async def _get_channels_from_universe(
-        self, universe: List[Dict[str, any]]
-    ) -> Set[str]:
+        self, universe: list[dict[str, any]]
+    ) -> set[str]:
         """
         Parses the rich universe object to extract symbols
         for this client's specific shard.

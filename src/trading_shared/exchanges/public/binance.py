@@ -2,16 +2,17 @@
 
 # --- Built Ins ---
 import asyncio
-from typing import List, Dict, Any
+from typing import Any
 
 # --- Installed ---
 import aiohttp
 from loguru import logger as log
 
+from ...config.models import ExchangeSettings
+
 # --- Shared Library Imports ---
 from .base import PublicClient
 from .binance_constants import BinanceMarketType
-from ...config.models import ExchangeSettings
 
 
 class BinancePublicClient(PublicClient):
@@ -55,7 +56,7 @@ class BinancePublicClient(PublicClient):
         exchange: str,
         instrument_name: str,
         resolution: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Transforms a single raw candle from Binance API into our standard dict format."""
         return {
             "exchange": exchange,
@@ -76,7 +77,7 @@ class BinancePublicClient(PublicClient):
         resolution: str,
         start_timestamp_ms: int,
         limit: int,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Private method to repeatedly call the klines endpoint to fetch all candles
         from a start time until the present.
@@ -150,7 +151,7 @@ class BinancePublicClient(PublicClient):
         resolution: str,
         start_timestamp_ms: int,
         limit: int = 1000,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Public method to fetch OHLC (k-line) data for a symbol.
         It automatically handles pagination to retrieve all available data from the
@@ -177,7 +178,7 @@ class BinancePublicClient(PublicClient):
 
     async def _get_raw_exchange_info_for_market(
         self, market_type_url: str, market_type_name: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Fetches the raw, untransformed exchange info for a single given market type."""
         try:
             url = f"{market_type_url}/exchangeInfo"
@@ -192,7 +193,7 @@ class BinancePublicClient(PublicClient):
             log.error(f"Failed to fetch raw exchange info from {url}: {e}")
             return []
 
-    async def get_instruments(self, currencies: List[str]) -> List[Dict[str, Any]]:
+    async def get_instruments(self, currencies: list[str]) -> list[dict[str, Any]]:
         """
         Fetches instrument details for all supported market types.
         The 'currencies' argument is ignored as Binance API does not filter by currency.

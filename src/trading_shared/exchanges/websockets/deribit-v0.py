@@ -5,21 +5,23 @@ import asyncio
 import json
 import random
 import time
-from typing import AsyncGenerator, List, Optional
+from collections.abc import AsyncGenerator
 
-# --- Installed  ---
-from loguru import logger as log
 import orjson
 import websockets
 
-# --- Local Application Imports ---
-from ...clients.redis_client import CustomRedisClient
-from ...clients.postgres_client import PostgresClient
-from ...config.models import ExchangeSettings
-from .base import AbstractWsClient
+# --- Installed  ---
+from loguru import logger as log
 
 # --- Shared Library Imports  ---
-from trading_engine_core.models import StreamMessage, MarketDefinition
+from trading_engine_core.models import MarketDefinition, StreamMessage
+
+from ...clients.postgres_client import PostgresClient
+
+# --- Local Application Imports ---
+from ...clients.redis_client import CustomRedisClient
+from ...config.models import ExchangeSettings
+from .base import AbstractWsClient
 
 
 class DeribitWsClient(AbstractWsClient):
@@ -40,8 +42,8 @@ class DeribitWsClient(AbstractWsClient):
             raise ValueError("Deribit client_id and client_secret must be configured.")
         self.client_id = self.settings.client_id
         self.client_secret = self.settings.client_secret
-        self.websocket_client: Optional[websockets.WebSocketClientProtocol] = None
-        self.instrument_names: List[str] = []
+        self.websocket_client: websockets.WebSocketClientProtocol | None = None
+        self.instrument_names: list[str] = []
 
     async def _send_json(self, data: dict):
         """

@@ -1,7 +1,7 @@
 # src/trading_shared/repositories/options_repository.py
 
 # --- Built Ins ---
-from typing import List, Dict, Any
+from typing import Any
 
 # --- Local Application Imports ---
 from trading_shared.clients.postgres_client import PostgresClient
@@ -11,7 +11,7 @@ class OptionsRepository:
     def __init__(self, db_client: PostgresClient):
         self._db = db_client
 
-    async def bulk_insert(self, options_data: List[Dict[str, Any]]):
+    async def bulk_insert(self, options_data: list[dict[str, Any]]):
         """
         Inserts a batch of options market data using the Postgres Composite Type.
         """

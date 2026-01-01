@@ -8,7 +8,6 @@ Deprecates: system:state:simple, system:state (without suffix)
 
 import json
 from datetime import datetime, timezone
-from typing import Dict, Optional, List
 from enum import Enum
 
 from loguru import logger as log
@@ -36,7 +35,7 @@ class StateRecord(BaseModel):
     timestamp: float = Field(
         default_factory=lambda: datetime.now(timezone.utc).timestamp()
     )
-    metadata: Dict = Field(default_factory=dict)
+    metadata: dict = Field(default_factory=dict)
 
 
 class SystemStateManager:
@@ -55,7 +54,7 @@ class SystemStateManager:
         self._cache_ttl = 5  # seconds
 
     async def set_global_state(
-        self, state: SystemState, reason: str = "", metadata: Optional[Dict] = None
+        self, state: SystemState, reason: str = "", metadata: dict | None = None
     ) -> None:
         """
         Sets the global system state. LOCKED global state overrides all other states.
@@ -85,7 +84,7 @@ class SystemStateManager:
         exchange: str,
         state: SystemState,
         reason: str = "",
-        metadata: Optional[Dict] = None,
+        metadata: dict | None = None,
     ) -> None:
         """
         Sets exchange-specific state. Exchange state is subordinate to global state.
@@ -115,7 +114,7 @@ class SystemStateManager:
 
         log.info(f"Exchange {exchange} state set to {state.value}: {reason}")
 
-    async def get_global_state(self) -> Optional[StateRecord]:
+    async def get_global_state(self) -> StateRecord | None:
         """Gets the current global system state."""
         cache_key = "global_state"
         if cache_key in self._cache:
@@ -140,7 +139,7 @@ class SystemStateManager:
             log.error(f"Failed to parse global state: {e}")
             return None
 
-    async def get_exchange_state(self, exchange: str) -> Optional[StateRecord]:
+    async def get_exchange_state(self, exchange: str) -> StateRecord | None:
         """Gets the current state for a specific exchange."""
         cache_key = f"exchange_state_{exchange}"
         if cache_key in self._cache:
@@ -191,7 +190,7 @@ class SystemStateManager:
         )
         return False
 
-    async def get_all_states(self) -> Dict:
+    async def get_all_states(self) -> dict:
         """Returns all current states for debugging/monitoring."""
         global_state = await self.get_global_state()
         exchanges = ["deribit", "binance"]  # Should be dynamic

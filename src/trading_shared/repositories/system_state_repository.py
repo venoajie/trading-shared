@@ -1,7 +1,7 @@
 # src/trading_shared/repositories/system_state_repository.py
 
 # --- Built Ins ---
-from typing import List, Any, Optional
+from typing import Any
 
 # --- Installed ---
 import orjson
@@ -18,7 +18,7 @@ class SystemStateRepository:
         self.redis = redis_client
 
     async def set_active_universe(
-        self, key: str, universe_data: List[Any], ttl_seconds: int
+        self, key: str, universe_data: list[Any], ttl_seconds: int
     ):
         """
         Sets the canonical trading universe state.
@@ -40,7 +40,7 @@ class SystemStateRepository:
                 f"Attempted to write to key '{key}' with data of type '{type(universe_data).__name__}'."
             )
 
-    async def get_active_universe(self, key: str) -> List[Any]:
+    async def get_active_universe(self, key: str) -> list[Any]:
         """
         Gets the canonical trading universe from a specified Redis key.
         Returns: A list of dictionary objects, or an empty list on failure.

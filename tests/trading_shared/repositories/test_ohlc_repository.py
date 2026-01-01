@@ -1,9 +1,9 @@
 # tests/trading_shared/repositories/test_ohlc_repository.py
 
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
 
 from trading_shared.repositories.ohlc_repository import OhlcRepository
 

@@ -1,12 +1,13 @@
 # src/trading_shared/exchanges/public/client_map.py
 
 # --- Installed ---
+
 import aiohttp
 from loguru import logger as log
-from typing import List, Dict
 
 # --- Shared Library Imports ---
 from trading_shared.config.models import ExchangeSettings
+
 from .base import PublicClient
 from .binance import BinancePublicClient
 from .deribit import DeribitPublicClient
@@ -19,8 +20,8 @@ CLIENT_MAP = {
 
 
 def get_all_public_clients(
-    configs: Dict[str, ExchangeSettings], http_session: aiohttp.ClientSession
-) -> List[PublicClient]:
+    configs: dict[str, ExchangeSettings], http_session: aiohttp.ClientSession
+) -> list[PublicClient]:
     """
     Factory function to instantiate all configured public exchange clients.
     """

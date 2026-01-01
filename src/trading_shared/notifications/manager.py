@@ -1,7 +1,8 @@
 # src/trading_shared/notifications/manager.py
 
 import asyncio
-from typing import Optional, Self
+from typing import Self
+
 import aiohttp
 from loguru import logger as log
 from trading_engine_core.models import SignalEvent
@@ -13,8 +14,8 @@ class NotificationManager:
     def __init__(
         self,
         session: aiohttp.ClientSession,
-        telegram_token: Optional[str],
-        telegram_chat_id: Optional[str],
+        telegram_token: str | None,
+        telegram_chat_id: str | None,
     ):
         self._session = session
         self._telegram_token = telegram_token
@@ -25,8 +26,8 @@ class NotificationManager:
     async def create(
         cls,
         session: aiohttp.ClientSession,
-        telegram_token: Optional[str],
-        telegram_chat_id: Optional[str],
+        telegram_token: str | None,
+        telegram_chat_id: str | None,
     ) -> Self:
         """
         Asynchronously creates and validates a NotificationManager instance.

@@ -3,12 +3,12 @@
 # --- Built Ins  ---
 import asyncio
 from collections.abc import Awaitable, Callable
-from typing import Any, List, Optional, TypeVar
+from typing import Any, TypeVar
 
 # --- Installed  ---
 import asyncpg
-from loguru import logger as log
 import orjson
+from loguru import logger as log
 
 # --- Local Application Imports ---
 from ..config.models import PostgresSettings
@@ -26,7 +26,7 @@ class PostgresClient:
     def __init__(self, settings: PostgresSettings):
         self.postgres_settings = settings
         self.dsn = self.postgres_settings.dsn
-        self._pool: Optional[asyncpg.Pool] = None
+        self._pool: asyncpg.Pool | None = None
         self._lock = asyncio.Lock()
 
     async def __aenter__(self):
@@ -144,13 +144,13 @@ class PostgresClient:
 
         return await self.execute_resiliently(command, command_name)
 
-    async def fetch(self, query: str, *args: Any) -> List[asyncpg.Record]:
+    async def fetch(self, query: str, *args: Any) -> list[asyncpg.Record]:
         command_name = query.strip().split()[0].upper()
         return await self.execute_resiliently(
             lambda conn: conn.fetch(query, *args), f"fetch_{command_name}"
         )
 
-    async def fetchrow(self, query: str, *args: Any) -> Optional[asyncpg.Record]:
+    async def fetchrow(self, query: str, *args: Any) -> asyncpg.Record | None:
         command_name = query.strip().split()[0].upper()
         return await self.execute_resiliently(
             lambda conn: conn.fetchrow(query, *args), f"fetchrow_{command_name}"

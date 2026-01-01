@@ -1,17 +1,18 @@
 # src/trading_shared/exchanges/public/deribit.py
 
 # --- Built Ins ---
-from typing import List, Dict, Any
 from datetime import datetime, timezone
+from typing import Any
 
 # --- Installed ---
 import aiohttp
 from loguru import logger as log
 
+from ...config.models import ExchangeSettings
+from ..trading.deribit_constants import ApiMethods
+
 # --- Shared Library Imports ---
 from .base import PublicClient
-from ..trading.deribit_constants import ApiMethods
-from ...config.models import ExchangeSettings
 
 
 class DeribitPublicClient(PublicClient):
@@ -34,7 +35,7 @@ class DeribitPublicClient(PublicClient):
         self.http_session = http_session
         self.exchange_name = exchange_name
 
-    async def _make_request(self, method: str, params: Dict[str, Any]) -> Dict:
+    async def _make_request(self, method: str, params: dict[str, Any]) -> dict:
         """Helper to make a JSON-RPC request to the Deribit API."""
         self._request_id += 1
         payload = {
@@ -64,11 +65,11 @@ class DeribitPublicClient(PublicClient):
 
     def _transform_candle_data_to_canonical(
         self,
-        raw_candles: Dict[str, List],
+        raw_candles: dict[str, list],
         exchange: str,
         instrument_name: str,
         resolution: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Transforms the Deribit chart data response into our standard list of dicts."""
         canonical_candles = []
         ticks = raw_candles.get("ticks", [])
@@ -102,7 +103,7 @@ class DeribitPublicClient(PublicClient):
         """The shared session is managed externally. This method is a no-op."""
         pass
 
-    async def get_instruments(self, currencies: List[str]) -> List[Dict[str, Any]]:
+    async def get_instruments(self, currencies: list[str]) -> list[dict[str, Any]]:
         """Fetches all instruments for the given currencies from Deribit."""
         all_instruments = []
         for currency in currencies:
@@ -121,7 +122,7 @@ class DeribitPublicClient(PublicClient):
         resolution: str,
         start_timestamp_ms: int,
         limit: int = 1000,  # Note: Deribit doesn't use a 'limit' param for this endpoint
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Fetches OHLC data from Deribit's public/get_tradingview_chart_data endpoint.
         Deribit's API takes a time range, so it is not paginated like Binance's.

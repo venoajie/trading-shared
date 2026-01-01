@@ -1,7 +1,7 @@
 # tests/trading_shared/clients/test_postgres_client.py
 
 import asyncio
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import asyncpg
 import pytest

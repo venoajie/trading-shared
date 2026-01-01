@@ -4,9 +4,10 @@
 import asyncio
 import uuid
 
+import oracledb
+
 # --- Installed  ---
 from loguru import logger as log
-import oracledb
 
 # Namespace for Trading App Accounts - DO NOT CHANGE
 TRADING_IDENTITY_NAMESPACE = uuid.UUID("951e7376-a07e-52ad-9477-030913972236")

@@ -1,8 +1,9 @@
 # tests/trading_shared/repositories/test_system_state_repository.py
 
+from unittest.mock import AsyncMock, MagicMock
+
 import orjson
 import pytest
-from unittest.mock import AsyncMock, MagicMock
 
 from trading_shared.repositories.system_state_repository import SystemStateRepository
 

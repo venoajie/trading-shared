@@ -1,15 +1,15 @@
 # src/trading_shared/notifications/telegram_client.py
 
 import asyncio
-from typing import Optional, Self
+from typing import Self
 
 import aiohttp
 from loguru import logger as log
 from tenacity import (
     retry,
+    retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
-    retry_if_exception_type,
 )
 
 
@@ -28,8 +28,8 @@ class TelegramClient:
     def __init__(
         self,
         session: aiohttp.ClientSession,
-        token: Optional[str],
-        chat_id: Optional[str],
+        token: str | None,
+        chat_id: str | None,
     ):
         self._session = session
         self._token = token
@@ -42,8 +42,8 @@ class TelegramClient:
     async def create(
         cls,
         session: aiohttp.ClientSession,
-        token: Optional[str],
-        chat_id: Optional[str],
+        token: str | None,
+        chat_id: str | None,
     ) -> Self:
         """Asynchronously creates and validates a TelegramClient instance."""
         client = cls(session, token, chat_id)

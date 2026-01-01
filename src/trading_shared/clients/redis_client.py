@@ -2,20 +2,18 @@
 
 # --- Built Ins  ---
 import asyncio
-import socket
 import time
-from collections.abc import Awaitable, Callable
 from collections import deque
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 
 # --- Installed  ---
 import orjson
 import redis.asyncio as aioredis
 from loguru import logger as log
 from redis import exceptions as redis_exceptions
-from redis.asyncio.client import PubSub
-from redis.asyncio.client import Pipeline
+from redis.asyncio.client import Pipeline, PubSub
 
 # --- Local Application Imports ---
 from ..config.models import RedisSettings
@@ -28,7 +26,7 @@ class CustomRedisClient:
 
     def __init__(self, settings: RedisSettings):
         self._settings = settings
-        self._client: Optional[aioredis.Redis] = None
+        self._client: aioredis.Redis | None = None
         self._circuit_open = False
         self._last_failure = 0
         self._reconnect_attempts = 0
@@ -411,7 +409,7 @@ class CustomRedisClient:
             return await self.execute_resiliently(
                 command, f"XREADGROUP on {stream_name}"
             )
-        except ConnectionError as e:
+        except ConnectionError:
             log.error(f"Redis connection lost while reading stream '{stream_name}'.")
             raise  # Re-raise to allow the calling loop to handle reconnection pauses.
 
@@ -543,7 +541,7 @@ class CustomRedisClient:
         self,
         name: str,
         key: str,
-    ) -> Optional[bytes]:
+    ) -> bytes | None:
         async def command(conn: aioredis.Redis):
             return await conn.hget(name, key)
 

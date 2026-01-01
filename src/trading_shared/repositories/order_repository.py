@@ -1,7 +1,6 @@
 # src/trading_shared/repositories/order_repository.py
 
 # --- Built Ins ---
-from typing import List, Optional
 
 # --- Installed ---
 import asyncpg
@@ -16,8 +15,8 @@ class OrderRepository:
 
     async def fetch_open_orders(
         self,
-        user_id: Optional[str] = None,
-    ) -> List[asyncpg.Record]:
+        user_id: str | None = None,
+    ) -> list[asyncpg.Record]:
         query = "SELECT * FROM orders WHERE trade_id IS NULL"
         params = [user_id] if user_id else []
         if user_id:

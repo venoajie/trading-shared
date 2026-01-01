@@ -1,7 +1,7 @@
 # src/trading_shared/repositories/trade_repository.py
 
 # --- Built Ins ---
-from typing import List, Optional, Dict, Any
+from typing import Any
 
 # --- Installed ---
 import asyncpg
@@ -15,15 +15,15 @@ class TradeRepository:
         self._db = db_client
 
     async def fetch_active_trades(
-        self, user_id: Optional[str] = None
-    ) -> List[asyncpg.Record]:
+        self, user_id: str | None = None
+    ) -> list[asyncpg.Record]:
         query = "SELECT * FROM v_active_trades"
         params = [user_id] if user_id else []
         if user_id:
             query += " WHERE user_id = $1"
         return await self._db.fetch(query, *params)
 
-    async def bulk_insert_public(self, trades: List[Dict[str, Any]]):
+    async def bulk_insert_public(self, trades: list[dict[str, Any]]):
         """
         Inserts a batch of public trades using the Postgres Composite Type.
         """

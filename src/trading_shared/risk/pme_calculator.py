@@ -1,7 +1,7 @@
 # src\trading_shared\risk\pme_calculator.py
 
 # --- Built Ins  ---
-from typing import Dict, Optional, Any
+from typing import Any
 
 # --- Installed  ---
 from loguru import logger as log
@@ -18,9 +18,9 @@ class PortfolioMarginCalculator:
     async def calculate_margins(
         self,
         account_state: Any,  # typed as Any to avoid circular dependency on AccountState
-        hypothetical_positions: Optional[Dict[str, float]] = None,
+        hypothetical_positions: dict[str, float] | None = None,
     ) -> MarginCalculationResult:
-        simulated_positions: Dict[str, float] = {}
+        simulated_positions: dict[str, float] = {}
 
         # Logic adapted to assume account_state has tracked_positions
         if hasattr(account_state, "tracked_positions"):

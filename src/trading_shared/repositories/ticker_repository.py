@@ -1,8 +1,8 @@
 # src/trading_shared/repositories/ticker_repository.py
 
 # --- Built Ins ---
-from typing import List, Dict, Any
 from datetime import UTC, datetime
+from typing import Any
 
 # --- Installed ---
 from loguru import logger as log
@@ -15,7 +15,7 @@ class TickerRepository:
     def __init__(self, db_client: PostgresClient):
         self._db = db_client
 
-    async def bulk_upsert(self, tickers_data: List[Dict[str, Any]]):
+    async def bulk_upsert(self, tickers_data: list[dict[str, Any]]):
         if not tickers_data:
             return
 

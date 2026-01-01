@@ -1,17 +1,16 @@
 # src\trading_shared\config\models.py
 
 # --- Built Ins  ---
-from typing import Optional
+from urllib.parse import quote_plus
 
 # --- Installed  ---
-from pydantic import BaseModel, Field, computed_field, SecretStr
-from urllib.parse import quote_plus
+from pydantic import BaseModel, Field, SecretStr, computed_field
 
 
 class RedisSettings(BaseModel):
     url: str
     db: int
-    password: Optional[SecretStr] = None
+    password: SecretStr | None = None
     write_concurrency_limit: int = Field(
         default=4, description="Concurrency limit for bulk write operations to Redis."
     )
@@ -70,11 +69,11 @@ class PostgresSettings(BaseModel):
 class ExchangeSettings(BaseModel):
     # API keys are now optional, allowing this model to be used
     # for both public and private clients.
-    client_id: Optional[str] = None
-    client_secret: Optional[SecretStr] = None
+    client_id: str | None = None
+    client_secret: SecretStr | None = None
 
     # WebSocket and REST URLs
-    ws_url: Optional[str] = None
+    ws_url: str | None = None
     rest_url: str = Field(default="https://www.deribit.com")
 
 

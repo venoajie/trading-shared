@@ -1,19 +1,20 @@
 # src/trading_shared/repositories/stream_processor_repository.py
 
 # --- Built Ins ---
-from typing import List, Dict, Any, Union
 from datetime import datetime, timezone
+from typing import Any
+
+import orjson
+import redis.asyncio as aioredis
 
 # --- Installed  ---
 from loguru import logger as log
-import orjson
-import redis.asyncio as aioredis
 
 # --- Shared Library Imports ---
 from trading_shared.clients.redis_client import CustomRedisClient
 
 
-def _safe_decode(value: bytes) -> Union[str, bytes]:
+def _safe_decode(value: bytes) -> str | bytes:
     """Attempts to decode a byte string as UTF-8, returning raw bytes on failure."""
     try:
         return value.decode("utf-8")
@@ -44,7 +45,7 @@ class StreamProcessorRepository:
         consumer_name: str,
         count: int = 250,
         block: int = 2000,
-    ) -> List:
+    ) -> list:
         """Reads a batch of messages from a consumer group."""
         return await self._redis.read_stream_messages(
             stream_name=stream_name,
@@ -58,7 +59,7 @@ class StreamProcessorRepository:
         self,
         stream_name: str,
         group_name: str,
-        message_ids: List[str],
+        message_ids: list[str],
     ):
         """Acknowledges one or more messages in a consumer group."""
         if not message_ids:
@@ -88,7 +89,7 @@ class StreamProcessorRepository:
     async def move_to_dlq(
         self,
         stream_name: str,
-        failed_messages: List[Dict[str, Any]],
+        failed_messages: list[dict[str, Any]],
     ):
         """Moves a list of failed messages to the DLQ stream."""
         await self._redis.xadd_to_dlq(stream_name, failed_messages)
@@ -139,7 +140,7 @@ class StreamProcessorRepository:
         # Call the public method, not the private one.
         await self._redis.execute_resiliently(command, "move_to_dlq_and_ack")
 
-    async def enqueue_malformed_trade(self, trade_data: Dict):
+    async def enqueue_malformed_trade(self, trade_data: dict):
         """Pushes a trade that failed processing to a dead-letter queue."""
         dlq_key = "dlq:malformed_trades"
         log.critical(f"Moving malformed trade to DLQ '{dlq_key}': {trade_data}")

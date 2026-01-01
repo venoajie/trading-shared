@@ -1,7 +1,7 @@
 # src\trading_shared\exchanges\mappers.py
 
 # --- Built Ins  ---
-from typing import Dict, Any
+from typing import Any
 
 # --- Shared Library Imports  ---
 from trading_engine_core.enums import MarketType
@@ -9,7 +9,7 @@ from trading_engine_core.enums import MarketType
 
 def get_canonical_market_type(
     exchange_name: str,
-    raw_instrument: Dict[str, Any],
+    raw_instrument: dict[str, Any],
     source_hint: str = None,
 ) -> MarketType:
     """

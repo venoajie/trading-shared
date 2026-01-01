@@ -1,8 +1,8 @@
 # src/trading_shared/exchanges/transformer.py
 
 # --- Built Ins  ---
-from typing import Dict, Any
 from datetime import datetime, timezone
+from typing import Any
 
 # --- Installed  ---
 from loguru import logger as log
@@ -13,8 +13,8 @@ from .mappers import get_canonical_market_type
 
 
 def transform_binance_instrument_to_canonical(
-    raw_instrument: Dict[str, Any], market_type_hint: str
-) -> Dict[str, Any] | None:
+    raw_instrument: dict[str, Any], market_type_hint: str
+) -> dict[str, Any] | None:
     """
     Transforms a single raw Binance instrument into our canonical format.
     """
@@ -75,8 +75,8 @@ def transform_binance_instrument_to_canonical(
 
 
 def transform_deribit_instrument_to_canonical(
-    raw_instrument: Dict[str, Any],
-) -> Dict[str, Any]:
+    raw_instrument: dict[str, Any],
+) -> dict[str, Any]:
     """Transforms a single raw Deribit instrument into our canonical format."""
     instrument_name = raw_instrument.get("instrument_name")
     kind = raw_instrument.get("kind")

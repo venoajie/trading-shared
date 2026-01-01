@@ -1,9 +1,9 @@
 # src/trading_shared/utils/resource_manager.py
 
 # --- Built Ins ---
-from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator, Iterable
-from typing import Any, List
+from contextlib import asynccontextmanager
+from typing import Any
 
 # --- Installed ---
 from loguru import logger as log
@@ -34,7 +34,7 @@ async def managed_resources(resources: Iterable[Any]) -> AsyncGenerator[None, No
             await service.start()
             ...
     """
-    resource_list: List[Any] = list(resources)
+    resource_list: list[Any] = list(resources)
     try:
         yield
     finally:
@@ -44,14 +44,10 @@ async def managed_resources(resources: Iterable[Any]) -> AsyncGenerator[None, No
             resource_name = type(resource).__name__
             try:
                 # Prioritize the standard __aexit__ protocol.
-                if hasattr(resource, "__aexit__") and callable(
-                    getattr(resource, "__aexit__")
-                ):
+                if hasattr(resource, "__aexit__") and callable(resource.__aexit__):
                     await resource.__aexit__(None, None, None)
                 # Fallback to the .close() convention.
-                elif hasattr(resource, "close") and callable(
-                    getattr(resource, "close")
-                ):
+                elif hasattr(resource, "close") and callable(resource.close):
                     await resource.close()
                 # If no cleanup method is found, do nothing.
                 else:

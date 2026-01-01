@@ -1,7 +1,8 @@
 # src/trading_shared/repositories/market_data_repository.py
 
 # --- Built Ins ---
-from typing import List, Dict, Deque, Any, Optional
+from collections import deque
+from typing import Any
 
 # --- Installed ---
 import orjson
@@ -9,6 +10,7 @@ from loguru import logger as log
 
 # --- Shared Library Imports ---
 from trading_engine_core.models import StreamMessage
+
 from trading_shared.clients.redis_client import CustomRedisClient
 
 
@@ -23,7 +25,7 @@ class MarketDataRepository:
     async def add_messages_to_stream(
         self,
         stream_name: str,
-        messages: List[StreamMessage] | Deque[StreamMessage],
+        messages: list[StreamMessage] | deque[StreamMessage],
         maxlen: int = 10000,
     ):
         """Adds a batch of messages to a Redis stream."""
@@ -41,7 +43,7 @@ class MarketDataRepository:
     async def cache_ticker(
         self,
         symbol: str,
-        data: Dict,
+        data: dict,
     ):
         """Caches the latest ticker data in a Redis hash."""
         redis_key = f"ticker:{symbol}"
@@ -107,7 +109,7 @@ class MarketDataRepository:
         self,
         exchange: str,
         instrument_name: str,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         [REFACTORED] Retrieves the current in-flight candle from Redis using the v2.0 data contract.
         """

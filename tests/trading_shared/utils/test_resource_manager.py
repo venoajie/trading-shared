@@ -1,7 +1,8 @@
 # tests/trading_shared/utils/test_resource_manager.py
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, call
+
+import pytest
 
 from trading_shared.utils.resource_manager import managed_resources
 
