@@ -37,8 +37,7 @@ dev = [
 
 # Configuration for the Ruff linter and formatter.
 [tool.ruff]
-line-length = 88
-# Assumes the source code is in a `src` directory.
+#line-length = 120
 src = ["src"]
 
 [tool.ruff.lint]
