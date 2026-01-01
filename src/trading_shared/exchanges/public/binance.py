@@ -123,19 +123,19 @@ class BinancePublicClient(PublicClient):
 
             except aiohttp.ClientError as e:
                 log.error(f"API call failed for {instrument_name}: {e}")
-                hit_safety_limit = False # Also considered a form of exit
+                hit_safety_limit = False  # Also considered a form of exit
                 break
             except Exception:
                 log.exception(f"An unexpected error occurred during OHLC fetch for {instrument_name}")
-                hit_safety_limit = False # Also considered a form of exit
+                hit_safety_limit = False  # Also considered a form of exit
                 break
-        
+
         # 4. Check the flag's final state *after* the loop is finished.
         if hit_safety_limit:
             log.warning(f"Hit safety fetch limit for {instrument_name}. More data may be available.")
-        
+
         return all_candles
-            
+
     async def get_public_ohlc(
         self,
         instrument_name: str,
