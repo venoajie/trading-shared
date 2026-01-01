@@ -5,9 +5,7 @@ import time
 import uuid
 
 
-def generate_strategy_label(
-    strategy: str, state: str, cycle_id: uuid.UUID | None = None
-) -> str:
+def generate_strategy_label(strategy: str, state: str, cycle_id: uuid.UUID | None = None) -> str:
     """
     Generates a standardized label for a new strategy-driven order.
     New Format: {strategy}-{state}-{unix_ms_timestamp}-{cycle_id}

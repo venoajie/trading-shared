@@ -65,11 +65,7 @@ class CustomRedisClient:
                 self._circuit_open = False
 
             try:
-                password_value = (
-                    self._settings.password.get_secret_value()
-                    if self._settings.password
-                    else None
-                )
+                password_value = self._settings.password.get_secret_value() if self._settings.password else None
                 redis_url_as_string = str(self._settings.url)
 
                 self._client = aioredis.from_url(
@@ -89,9 +85,7 @@ class CustomRedisClient:
                 self._circuit_open = True
                 self._last_failure = time.time()
                 self._reconnect_attempts += 1
-                raise ConnectionError(
-                    "Redis connection failed on initial attempt."
-                ) from e
+                raise ConnectionError("Redis connection failed on initial attempt.") from e
 
     async def _safe_close_client(self):
         """Safely closes the current client instance, ignoring errors."""
@@ -125,16 +119,11 @@ class CustomRedisClient:
                 client = await self._get_client()
                 # Check if pool is None before using it
                 if client is None:
-                    raise ConnectionError(
-                        "Redis pool is None - connection not established"
-                    )
+                    raise ConnectionError("Redis pool is None - connection not established")
                 return await func(client)
             except AttributeError as e:
                 # Catch AttributeError when pool methods fail
-                log.warning(
-                    f"Redis command '{command_name_for_logging}' failed due to AttributeError "
-                    f"(attempt {attempt + 1}/{max_retries}): {e}"
-                )
+                log.warning(f"Redis command '{command_name_for_logging}' failed due to AttributeError (attempt {attempt + 1}/{max_retries}): {e}")
                 last_exception = e
                 await self._safe_close_client()
                 if attempt < max_retries - 1:
@@ -145,21 +134,14 @@ class CustomRedisClient:
                 TimeoutError,
                 ConnectionError,  # Catch our own ConnectionError
             ) as e:
-                log.warning(
-                    f"Redis command '{command_name_for_logging}' failed "
-                    f"(attempt {attempt + 1}/{max_retries}): {e}"
-                )
+                log.warning(f"Redis command '{command_name_for_logging}' failed (attempt {attempt + 1}/{max_retries}): {e}")
                 last_exception = e
                 await self._safe_close_client()
                 if attempt < max_retries - 1:
                     await asyncio.sleep(initial_delay * (2**attempt))
 
-        log.error(
-            f"Redis command '{command_name_for_logging}' failed after {max_retries} attempts."
-        )
-        raise ConnectionError(
-            f"Failed to execute Redis command '{command_name_for_logging}' after retries."
-        ) from last_exception
+        log.error(f"Redis command '{command_name_for_logging}' failed after {max_retries} attempts.")
+        raise ConnectionError(f"Failed to execute Redis command '{command_name_for_logging}' after retries.") from last_exception
 
     @asynccontextmanager
     async def pubsub(self) -> PubSub:
@@ -183,7 +165,7 @@ class CustomRedisClient:
                             self._pubsub_connections.remove(conn)
                             self._pubsub_last_used.pop(id(conn), None)
                             log.debug("Recycled idle PubSub connection")
-                        except:
+                        except Exception:
                             pass
 
                 # Double-check after recycling
@@ -195,18 +177,13 @@ class CustomRedisClient:
                         pubsub_conn = client.pubsub()
                         self._pubsub_connections.append(pubsub_conn)
                         self._pubsub_last_used[id(pubsub_conn)] = current_time
-                        log.debug(
-                            f"Created new PubSub connection (total: {len(self._pubsub_connections)})"
-                        )
+                        log.debug(f"Created new PubSub connection (total: {len(self._pubsub_connections)})")
                     else:
                         # Wait with timeout to prevent deadlock
                         try:
-                            pubsub_conn = await asyncio.wait_for(
-                                self._pubsub_pool.get(), timeout=5.0
-                            )
-                        except asyncio.TimeoutError:
-                            raise ConnectionError("No PubSub connections available")
-
+                            pubsub_conn = await asyncio.wait_for(self._pubsub_pool.get(), timeout=5.0)
+                        except asyncio.TimeoutError as e:
+                            raise ConnectionError("No PubSub connections available") from e
         try:
             yield pubsub_conn
         finally:
@@ -264,11 +241,7 @@ class CustomRedisClient:
                         pipe = pool.pipeline()
                         for msg in current_chunk:
                             encoded_msg = {
-                                k.encode("utf-8"): (
-                                    orjson.dumps(v)
-                                    if isinstance(v, (dict, list, tuple))
-                                    else str(v).encode("utf-8")
-                                )
+                                k.encode("utf-8"): (orjson.dumps(v) if isinstance(v, (dict, list, tuple)) else str(v).encode("utf-8"))
                                 for k, v in msg.items()
                             }
                             pipe.xadd(
@@ -282,9 +255,7 @@ class CustomRedisClient:
                 await self.execute_resiliently(command, "pipeline.execute(xadd)")
             # Only catch the final, definitive ConnectionError from the resilient wrapper.
             except ConnectionError as e:
-                log.error(
-                    f"Final attempt to send chunk failed. Moving to DLQ stream. Error: {e}"
-                )
+                log.error(f"Final attempt to send chunk failed. Moving to DLQ stream. Error: {e}")
                 await self.xadd_to_dlq(stream_name, chunk)
                 # Re-raise to signal that the write operation ultimately failed.
                 raise
@@ -308,9 +279,7 @@ class CustomRedisClient:
             domain, type_ = parts[0], parts[1]
             dlq_stream_name = f"deadletter:queue:{domain}:{type_}"
         else:
-            log.error(
-                f"Could not parse domain/type from '{original_stream_name}'. Using fallback DLQ."
-            )
+            log.error(f"Could not parse domain/type from '{original_stream_name}'. Using fallback DLQ.")
             dlq_stream_name = f"deadletter:queue:malformed:{original_stream_name}"
 
         try:
@@ -318,21 +287,13 @@ class CustomRedisClient:
             async def command(pool: aioredis.Redis):
                 pipe = pool.pipeline()
                 for msg in failed_messages:
-                    pipe.xadd(
-                        dlq_stream_name, {"payload": orjson.dumps(msg)}, maxlen=25000
-                    )
+                    pipe.xadd(dlq_stream_name, {"payload": orjson.dumps(msg)}, maxlen=25000)
                 await pipe.execute()
 
-            await self.execute_resiliently(
-                command, f"pipeline.execute(xadd_dlq to {dlq_stream_name})"
-            )
-            log.warning(
-                f"{len(failed_messages)} message(s) moved to DLQ stream '{dlq_stream_name}' from '{original_stream_name}'"
-            )
+            await self.execute_resiliently(command, f"pipeline.execute(xadd_dlq to {dlq_stream_name})")
+            log.warning(f"{len(failed_messages)} message(s) moved to DLQ stream '{dlq_stream_name}' from '{original_stream_name}'")
         except Exception as e:
-            log.critical(
-                f"CRITICAL: Failed to write to DLQ stream '{dlq_stream_name}': {e}"
-            )
+            log.critical(f"CRITICAL: Failed to write to DLQ stream '{dlq_stream_name}': {e}")
 
     # --- END: REMEDIATION FOR FLAW 1 ---
 
@@ -351,9 +312,7 @@ class CustomRedisClient:
                 ),
                 "xgroup_create",
             )
-            log.info(
-                f"Created consumer group '{group_name}' for stream '{stream_name}'."
-            )
+            log.info(f"Created consumer group '{group_name}' for stream '{stream_name}'.")
         except redis_exceptions.ResponseError as e:
             if "BUSYGROUP" in str(e):
                 log.debug(f"Consumer group '{group_name}' already exists.")
@@ -395,20 +354,14 @@ class CustomRedisClient:
 
                 except redis_exceptions.ResponseError as e:
                     if "NOGROUP" in str(e):
-                        log.warning(
-                            f"Consumer group '{group_name}' not found for stream '{stream_name}', recreating..."
-                        )
+                        log.warning(f"Consumer group '{group_name}' not found for stream '{stream_name}', recreating...")
                         # This should be handled by ensure_consumer_group before calling,
                         # but this is a safe fallback.
-                        await pool.xgroup_create(
-                            stream_name, group_name, id="0", mkstream=True
-                        )
+                        await pool.xgroup_create(stream_name, group_name, id="0", mkstream=True)
                         return []
                     raise
 
-            return await self.execute_resiliently(
-                command, f"XREADGROUP on {stream_name}"
-            )
+            return await self.execute_resiliently(command, f"XREADGROUP on {stream_name}")
         except ConnectionError:
             log.error(f"Redis connection lost while reading stream '{stream_name}'.")
             raise  # Re-raise to allow the calling loop to handle reconnection pauses.
@@ -421,9 +374,7 @@ class CustomRedisClient:
     ) -> None:
         if not message_ids:
             return
-        await self.execute_resiliently(
-            lambda pool: pool.xack(stream_name, group_name, *message_ids), "xack"
-        )
+        await self.execute_resiliently(lambda pool: pool.xack(stream_name, group_name, *message_ids), "xack")
 
     async def xautoclaim_stale_messages(
         self,
@@ -462,8 +413,7 @@ class CustomRedisClient:
         dependency injection. Direct state access via this client is forbidden.
         """
         raise NotImplementedError(
-            "get_system_state is deprecated. Use a dedicated SystemStateManager "
-            "to ensure compliance with the hierarchical state protocol."
+            "get_system_state is deprecated. Use a dedicated SystemStateManager to ensure compliance with the hierarchical state protocol."
         )
 
     # --- END: REMEDIATION FOR FLAW 2 ---
@@ -492,9 +442,7 @@ class CustomRedisClient:
                 log_message += f" (Reason: {reason})"
             log.info(log_message)
         except ConnectionError:
-            log.error(
-                f"Could not set system state to '{state}' due to Redis connection error."
-            )
+            log.error(f"Could not set system state to '{state}' due to Redis connection error.")
 
     async def get_client_deprecated(self) -> aioredis.Redis:
         """Returns a client instance from the connection pool."""
@@ -605,41 +553,26 @@ class CustomRedisClient:
         maxlen: int | None = None,
         approximate: bool = True,
     ):
-        encoded_fields = {
-            k.encode("utf-8") if isinstance(k, str) else k: v.encode("utf-8")
-            if isinstance(v, str)
-            else v
-            for k, v in fields.items()
-        }
+        encoded_fields = {k.encode("utf-8") if isinstance(k, str) else k: v.encode("utf-8") if isinstance(v, str) else v for k, v in fields.items()}
 
         async def command(conn: aioredis.Redis):
-            await conn.xadd(
-                name, encoded_fields, maxlen=maxlen, approximate=approximate
-            )
+            await conn.xadd(name, encoded_fields, maxlen=maxlen, approximate=approximate)
 
         await self.execute_resiliently(command, f"XADD {name}")
 
     async def lpush(self, key: str, value: str | bytes):
-        return await self.execute_resiliently(
-            lambda pool: pool.lpush(key, value), f"LPUSH {key}"
-        )
+        return await self.execute_resiliently(lambda pool: pool.lpush(key, value), f"LPUSH {key}")
 
     async def brpop(self, key: str, timeout: int) -> tuple[bytes, bytes] | None:
-        return await self.execute_resiliently(
-            lambda pool: pool.brpop(key, timeout=timeout), f"BRPOP {key}"
-        )
+        return await self.execute_resiliently(lambda pool: pool.brpop(key, timeout=timeout), f"BRPOP {key}")
 
     async def delete(self, key: str):
         """Deletes a key from Redis."""
-        return await self.execute_resiliently(
-            lambda pool: pool.delete(key), f"DELETE {key}"
-        )
+        return await self.execute_resiliently(lambda pool: pool.delete(key), f"DELETE {key}")
 
     async def llen(self, key: str) -> int:
         """Returns the length of a list in Redis."""
-        return await self.execute_resiliently(
-            lambda pool: pool.llen(key), f"LLEN {key}"
-        )
+        return await self.execute_resiliently(lambda pool: pool.llen(key), f"LLEN {key}")
 
     async def ping(self) -> bool:
         """
@@ -652,7 +585,7 @@ class CustomRedisClient:
             return result == b"PONG" or result is True
         except Exception as e:
             log.warning(f"Redis ping failed: {e}")
-            raise ConnectionError(f"Redis ping failed: {e}")
+            raise ConnectionError(f"Redis ping failed: {e}") from e
 
     async def test_connection(self) -> bool:
         """
@@ -697,11 +630,7 @@ class CustomRedisClient:
     async def sadd(self, key: str, *values):
         if not values:
             return
-        return await self.execute_resiliently(
-            lambda client: client.sadd(key, *values), f"SADD {key}"
-        )
+        return await self.execute_resiliently(lambda client: client.sadd(key, *values), f"SADD {key}")
 
     async def smembers(self, key: str) -> set:
-        return await self.execute_resiliently(
-            lambda client: client.smembers(key), f"SMEMBERS {key}"
-        )
+        return await self.execute_resiliently(lambda client: client.smembers(key), f"SMEMBERS {key}")

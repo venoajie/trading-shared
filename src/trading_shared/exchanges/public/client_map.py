@@ -19,9 +19,7 @@ CLIENT_MAP = {
 }
 
 
-def get_all_public_clients(
-    configs: dict[str, ExchangeSettings], http_session: aiohttp.ClientSession
-) -> list[PublicClient]:
+def get_all_public_clients(configs: dict[str, ExchangeSettings], http_session: aiohttp.ClientSession) -> list[PublicClient]:
     """
     Factory function to instantiate all configured public exchange clients.
     """

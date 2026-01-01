@@ -43,9 +43,7 @@ class BinancePublicClient(PublicClient):
         return self.spot_url
 
     # A placeholder for the detection logic mentioned above
-    def get_market_type_from_instrument_name(
-        self, instrument_name: str
-    ) -> BinanceMarketType:
+    def get_market_type_from_instrument_name(self, instrument_name: str) -> BinanceMarketType:
         if "PERP" in instrument_name:
             return BinanceMarketType.FUTURES_USD_M
         return BinanceMarketType.SPOT
@@ -85,7 +83,10 @@ class BinancePublicClient(PublicClient):
         all_candles = []
         next_start_time_ms = start_timestamp_ms
 
-        for i in range(self._SAFETY_FETCH_LIMIT):
+        # 1. Assume the loop will hit the safety limit unless a clean exit occurs.
+        hit_safety_limit = True
+
+        for _ in range(self._SAFETY_FETCH_LIMIT):
             params = {
                 "symbol": instrument_name.replace("/", ""),
                 "interval": resolution,
@@ -94,57 +95,47 @@ class BinancePublicClient(PublicClient):
             }
 
             try:
-                async with self.http_session.get(
-                    f"{api_url}/klines", params=params
-                ) as response:
+                async with self.http_session.get(f"{api_url}/klines", params=params) as response:
                     response.raise_for_status()
                     raw_candles = await response.json()
 
                     if not raw_candles:
-                        log.info(
-                            f"[{instrument_name}] No more candles returned. Pagination complete."
-                        )
+                        log.info(f"[{instrument_name}] No more candles returned. Pagination complete.")
+                        # 2. Set flag to False on clean exit.
+                        hit_safety_limit = False
                         break
 
-                    candles = [
-                        self._transform_candle_data_to_canonical(
-                            c, "binance", instrument_name, resolution
-                        )
-                        for c in raw_candles
-                    ]
+                    candles = [self._transform_candle_data_to_canonical(c, "binance", instrument_name, resolution) for c in raw_candles]
                     all_candles.extend(candles)
 
                     last_candle_timestamp = candles[-1]["tick"]
                     next_start_time_ms = last_candle_timestamp + 1
 
-                    log.debug(
-                        f"Fetched {len(candles)} candles for {instrument_name}. Next fetch starts at {next_start_time_ms}."
-                    )
+                    log.debug(f"Fetched {len(candles)} candles for {instrument_name}. Next fetch starts at {next_start_time_ms}.")
 
                     if len(raw_candles) < limit:
-                        log.info(
-                            f"[{instrument_name}] Reached end of available data. Pagination complete."
-                        )
+                        log.info(f"[{instrument_name}] Reached end of available data. Pagination complete.")
+                        # 3. Set flag to False on clean exit.
+                        hit_safety_limit = False
                         break
 
                     await asyncio.sleep(0.2)
 
             except aiohttp.ClientError as e:
                 log.error(f"API call failed for {instrument_name}: {e}")
+                hit_safety_limit = False # Also considered a form of exit
                 break
             except Exception:
-                log.exception(
-                    f"An unexpected error occurred during OHLC fetch for {instrument_name}"
-                )
+                log.exception(f"An unexpected error occurred during OHLC fetch for {instrument_name}")
+                hit_safety_limit = False # Also considered a form of exit
                 break
-
-        if i == self._SAFETY_FETCH_LIMIT - 1:
-            log.warning(
-                f"Hit safety fetch limit for {instrument_name}. More data may be available."
-            )
-
+        
+        # 4. Check the flag's final state *after* the loop is finished.
+        if hit_safety_limit:
+            log.warning(f"Hit safety fetch limit for {instrument_name}. More data may be available.")
+        
         return all_candles
-
+            
     async def get_public_ohlc(
         self,
         instrument_name: str,
@@ -176,9 +167,7 @@ class BinancePublicClient(PublicClient):
         """The shared session is managed externally. This method is a no-op."""
         pass
 
-    async def _get_raw_exchange_info_for_market(
-        self, market_type_url: str, market_type_name: str
-    ) -> list[dict[str, Any]]:
+    async def _get_raw_exchange_info_for_market(self, market_type_url: str, market_type_name: str) -> list[dict[str, Any]]:
         """Fetches the raw, untransformed exchange info for a single given market type."""
         try:
             url = f"{market_type_url}/exchangeInfo"
@@ -205,17 +194,10 @@ class BinancePublicClient(PublicClient):
             "inverse_futures": self.inverse_futures_url,
         }
 
-        tasks = [
-            self._get_raw_exchange_info_for_market(url, name)
-            for name, url in markets_to_query.items()
-        ]
+        tasks = [self._get_raw_exchange_info_for_market(url, name) for name, url in markets_to_query.items()]
         results_by_market = await asyncio.gather(*tasks)
 
-        all_instruments = [
-            inst for market_list in results_by_market for inst in market_list
-        ]
+        all_instruments = [inst for market_list in results_by_market for inst in market_list]
 
-        log.success(
-            f"[BinancePublicClient] Total raw instruments fetched: {len(all_instruments)}"
-        )
+        log.success(f"[BinancePublicClient] Total raw instruments fetched: {len(all_instruments)}")
         return all_instruments

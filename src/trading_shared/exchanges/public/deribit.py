@@ -45,9 +45,7 @@ class DeribitPublicClient(PublicClient):
             "params": params,
         }
         try:
-            async with self.http_session.post(
-                f"{self.base_url}/api/v2/{method}", json=payload
-            ) as response:
+            async with self.http_session.post(f"{self.base_url}/api/v2/{method}", json=payload) as response:
                 response.raise_for_status()
                 data = await response.json()
                 if "error" in data:
@@ -58,9 +56,7 @@ class DeribitPublicClient(PublicClient):
             log.error(f"Failed to call Deribit API method {method}: {e}")
             return {}
         except Exception:
-            log.exception(
-                f"An unexpected error occurred during Deribit API call for {method}"
-            )
+            log.exception(f"An unexpected error occurred during Deribit API call for {method}")
             return {}
 
     def _transform_candle_data_to_canonical(
@@ -111,9 +107,7 @@ class DeribitPublicClient(PublicClient):
             instruments = await self._make_request(ApiMethods.GET_INSTRUMENTS, params)
             if instruments:
                 all_instruments.extend(instruments)
-        log.success(
-            f"[DeribitPublicClient] Total raw instruments fetched: {len(all_instruments)}"
-        )
+        log.success(f"[DeribitPublicClient] Total raw instruments fetched: {len(all_instruments)}")
         return all_instruments
 
     async def get_public_ohlc(
@@ -131,9 +125,7 @@ class DeribitPublicClient(PublicClient):
         resolution_map = {"1m": "1", "5m": "5", "15m": "15", "1h": "60", "1d": "1D"}
         deribit_resolution = resolution_map.get(resolution)
         if not deribit_resolution:
-            log.error(
-                f"Unsupported resolution for Deribit: {resolution}. Must be one of {list(resolution_map.keys())}"
-            )
+            log.error(f"Unsupported resolution for Deribit: {resolution}. Must be one of {list(resolution_map.keys())}")
             return []
 
         # We fetch up to the current time.
@@ -147,9 +139,7 @@ class DeribitPublicClient(PublicClient):
         }
 
         log.info(f"Fetching OHLC for {instrument_name} from Deribit...")
-        raw_data = await self._make_request(
-            ApiMethods.GET_TRADINGVIEW_CHART_DATA, params
-        )
+        raw_data = await self._make_request(ApiMethods.GET_TRADINGVIEW_CHART_DATA, params)
 
         if not raw_data or raw_data.get("status") != "ok":
             log.warning(f"No OHLC data returned from Deribit for {instrument_name}.")

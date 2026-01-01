@@ -44,9 +44,7 @@ class OhlcWorkQueueRepository:
             await self._redis.lpush(self._FAILED_QUEUE_KEY, orjson.dumps(work_item))
             log.error(f"Moved failed OHLC work item to DLQ: {work_item}")
         except Exception as e:
-            log.critical(
-                f"CRITICAL: Failed to enqueue to DLQ. Item lost: {work_item}. Error: {e}"
-            )
+            log.critical(f"CRITICAL: Failed to enqueue to DLQ. Item lost: {work_item}. Error: {e}")
 
     async def dequeue_work(self) -> dict[str, Any] | None:
         """Blocks and waits for a work item from the queue."""

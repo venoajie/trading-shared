@@ -14,9 +14,7 @@ class TradeRepository:
     def __init__(self, db_client: PostgresClient):
         self._db = db_client
 
-    async def fetch_active_trades(
-        self, user_id: str | None = None
-    ) -> list[asyncpg.Record]:
+    async def fetch_active_trades(self, user_id: str | None = None) -> list[asyncpg.Record]:
         query = "SELECT * FROM v_active_trades"
         params = [user_id] if user_id else []
         if user_id:

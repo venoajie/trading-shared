@@ -32,9 +32,7 @@ class StateRecord(BaseModel):
 
     status: SystemState
     reason: str = ""
-    timestamp: float = Field(
-        default_factory=lambda: datetime.now(timezone.utc).timestamp()
-    )
+    timestamp: float = Field(default_factory=lambda: datetime.now(timezone.utc).timestamp())
     metadata: dict = Field(default_factory=dict)
 
 
@@ -53,9 +51,7 @@ class SystemStateManager:
         self._cache = {}
         self._cache_ttl = 5  # seconds
 
-    async def set_global_state(
-        self, state: SystemState, reason: str = "", metadata: dict | None = None
-    ) -> None:
+    async def set_global_state(self, state: SystemState, reason: str = "", metadata: dict | None = None) -> None:
         """
         Sets the global system state. LOCKED global state overrides all other states.
         """
@@ -92,9 +88,7 @@ class SystemStateManager:
         # Check global state first - if LOCKED, log warning but proceed
         global_state = await self.get_global_state()
         if global_state and global_state.status == SystemState.LOCKED:
-            log.warning(
-                f"Setting exchange state while global is LOCKED: {exchange}={state.value}"
-            )
+            log.warning(f"Setting exchange state while global is LOCKED: {exchange}={state.value}")
 
         record = StateRecord(status=state, reason=reason, metadata=metadata or {})
         key = f"system:state:{exchange.lower()}"
@@ -185,9 +179,7 @@ class SystemStateManager:
         ]:
             return True
 
-        log.warning(
-            f"Trading blocked on {exchange}: state={exchange_state.status if exchange_state else 'UNKNOWN'}"
-        )
+        log.warning(f"Trading blocked on {exchange}: state={exchange_state.status if exchange_state else 'UNKNOWN'}")
         return False
 
     async def get_all_states(self) -> dict:

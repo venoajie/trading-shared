@@ -22,9 +22,7 @@ class InstrumentRepository:
         query = "SELECT * FROM v_instruments WHERE exchange = $1"
         return await self._db.fetch(query, exchange_name)
 
-    async def find_instrument_by_name_and_kind(
-        self, exchange: str, canonical_name: str, instrument_kind: str
-    ) -> asyncpg.Record | None:
+    async def find_instrument_by_name_and_kind(self, exchange: str, canonical_name: str, instrument_kind: str) -> asyncpg.Record | None:
         """
         Finds a specific instrument record based on its canonical name and kind.
         e.g., Find the 'perpetual' instrument for the canonical name 'BTCUSDT'.
@@ -42,13 +40,9 @@ class InstrumentRepository:
     async def bulk_upsert(self, instruments: list[dict[str, Any]], exchange_name: str):
         if not instruments:
             return
-        instruments_with_exchange = [
-            {**inst, "exchange": exchange_name} for inst in instruments
-        ]
+        instruments_with_exchange = [{**inst, "exchange": exchange_name} for inst in instruments]
         await self._db.execute(
             "SELECT bulk_upsert_instruments($1::jsonb[])",
             instruments_with_exchange,
         )
-        log.info(
-            f"Successfully bulk-upserted {len(instruments)} instruments for '{exchange_name}'."
-        )
+        log.info(f"Successfully bulk-upserted {len(instruments)} instruments for '{exchange_name}'.")

@@ -75,9 +75,7 @@ class StreamProcessorRepository:
         count: int = 100,
     ) -> tuple[bytes, list]:
         """Claims stale pending messages from other consumers."""
-        return await self._redis.xautoclaim_stale_messages(
-            stream_name, group_name, consumer_name, min_idle_time_ms, count
-        )
+        return await self._redis.xautoclaim_stale_messages(stream_name, group_name, consumer_name, min_idle_time_ms, count)
 
     async def publish_state_change(
         self,
@@ -114,14 +112,10 @@ class StreamProcessorRepository:
         and ACKs the original message to prevent reprocessing.
         """
         dlq_stream = f"dlq:{source_stream}"
-        log.warning(
-            f"Moving failed message {message_id} from '{source_stream}' to DLQ '{dlq_stream}'"
-        )
+        log.warning(f"Moving failed message {message_id} from '{source_stream}' to DLQ '{dlq_stream}'")
 
         # Perform safe decoding
-        safely_decoded_payload = {
-            _safe_decode(k): _safe_decode(v) for k, v in message_data.items()
-        }
+        safely_decoded_payload = {_safe_decode(k): _safe_decode(v) for k, v in message_data.items()}
 
         failed_message_payload = {
             "original_message_id": message_id,

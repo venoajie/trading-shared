@@ -25,9 +25,7 @@ def system_state_repo(mock_redis_client):
 
 @pytest.mark.asyncio
 class TestSystemStateRepository:
-    async def test_set_active_universe_serializes_and_calls_redis(
-        self, system_state_repo, mock_redis_client
-    ):
+    async def test_set_active_universe_serializes_and_calls_redis(self, system_state_repo, mock_redis_client):
         # Arrange
         key = "system:state:test:universe"
         universe_data = [{"symbol": "BTCUSDT"}, {"symbol": "ETHUSDT"}]
@@ -40,9 +38,7 @@ class TestSystemStateRepository:
         # Assert
         mock_redis_client.set.assert_awaited_once_with(key, expected_payload, ex=ttl)
 
-    async def test_get_active_universe_deserializes_correctly(
-        self, system_state_repo, mock_redis_client
-    ):
+    async def test_get_active_universe_deserializes_correctly(self, system_state_repo, mock_redis_client):
         # Arrange
         key = "system:state:test:universe"
         expected_universe = [{"symbol": "BTCUSDT"}, {"symbol": "ETHUSDT"}]
@@ -56,9 +52,7 @@ class TestSystemStateRepository:
         mock_redis_client.get.assert_awaited_once_with(key)
         assert result == expected_universe
 
-    async def test_get_active_universe_returns_empty_list_if_key_not_found(
-        self, system_state_repo, mock_redis_client
-    ):
+    async def test_get_active_universe_returns_empty_list_if_key_not_found(self, system_state_repo, mock_redis_client):
         # Arrange
         key = "system:state:test:universe"
         mock_redis_client.get.return_value = None  # Key does not exist
@@ -69,9 +63,7 @@ class TestSystemStateRepository:
         # Assert
         assert result == []
 
-    async def test_get_active_universe_returns_empty_list_on_json_error(
-        self, system_state_repo, mock_redis_client
-    ):
+    async def test_get_active_universe_returns_empty_list_on_json_error(self, system_state_repo, mock_redis_client):
         # Arrange
         key = "system:state:test:universe"
         invalid_payload = b"not-valid-json"

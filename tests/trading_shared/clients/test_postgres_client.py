@@ -45,9 +45,7 @@ def mock_asyncpg_pool(mocker):
 class TestPostgresClient:
     """Unit tests for the PostgresClient."""
 
-    async def test_ensure_pool_is_ready_creates_pool_if_none(
-        self, postgres_settings, mocker, mock_asyncpg_pool
-    ):
+    async def test_ensure_pool_is_ready_creates_pool_if_none(self, postgres_settings, mocker, mock_asyncpg_pool):
         # Arrange
         mock_create_pool = mocker.patch(
             "asyncpg.create_pool",
@@ -64,9 +62,7 @@ class TestPostgresClient:
         assert pool is not None
         assert pool == mock_asyncpg_pool
 
-    async def test_ensure_pool_is_ready_returns_existing_pool(
-        self, postgres_settings, mocker, mock_asyncpg_pool
-    ):
+    async def test_ensure_pool_is_ready_returns_existing_pool(self, postgres_settings, mocker, mock_asyncpg_pool):
         # Arrange
         mocker.patch(
             "asyncpg.create_pool",
@@ -84,9 +80,7 @@ class TestPostgresClient:
         mock_create_pool_again.assert_not_called()
         assert pool == mock_asyncpg_pool
 
-    async def test_close_closes_and_clears_pool(
-        self, postgres_settings, mocker, mock_asyncpg_pool
-    ):
+    async def test_close_closes_and_clears_pool(self, postgres_settings, mocker, mock_asyncpg_pool):
         # Arrange
         mock_asyncpg_pool.close = AsyncMock()
         mocker.patch(
@@ -104,9 +98,7 @@ class TestPostgresClient:
         mock_asyncpg_pool.close.assert_awaited_once()
         assert client._pool is None
 
-    async def test_fetch_executes_correctly(
-        self, postgres_settings, mocker, mock_asyncpg_pool
-    ):
+    async def test_fetch_executes_correctly(self, postgres_settings, mocker, mock_asyncpg_pool):
         # Arrange
         mocker.patch(
             "asyncpg.create_pool",
@@ -125,9 +117,7 @@ class TestPostgresClient:
         mock_conn.fetch.assert_awaited_once_with(query, *params)
         assert result == [{"id": 1}]
 
-    async def test_execute_resiliently_retries_on_connection_error(
-        self, postgres_settings, mocker, mock_asyncpg_pool
-    ):
+    async def test_execute_resiliently_retries_on_connection_error(self, postgres_settings, mocker, mock_asyncpg_pool):
         # Arrange
         # Simulate failure on first attempt, success on second
         mocker.patch(
@@ -142,15 +132,11 @@ class TestPostgresClient:
         result = await client.fetch("SELECT 1")
 
         # Assert
-        assert (
-            client._pool.acquire.call_count == 1
-        )  # The successful pool was acquired once
+        assert client._pool.acquire.call_count == 1  # The successful pool was acquired once
         assert result == [{"id": 1}]
         assert asyncio.sleep.call_count == 1
 
-    async def test_execute_resiliently_fails_after_max_retries(
-        self, postgres_settings, mocker
-    ):
+    async def test_execute_resiliently_fails_after_max_retries(self, postgres_settings, mocker):
         # Arrange
         mocker.patch(
             "asyncpg.create_pool",
@@ -167,9 +153,7 @@ class TestPostgresClient:
         assert mocker.patch("asyncpg.create_pool").call_count == 2
         assert asyncio.sleep.call_count == 1
 
-    async def test_execute_parses_result_string(
-        self, postgres_settings, mocker, mock_asyncpg_pool
-    ):
+    async def test_execute_parses_result_string(self, postgres_settings, mocker, mock_asyncpg_pool):
         # Arrange
         mocker.patch(
             "asyncpg.create_pool",
@@ -186,9 +170,7 @@ class TestPostgresClient:
         # Assert
         assert result == 123
 
-    async def test_execute_handles_no_count_in_result(
-        self, postgres_settings, mocker, mock_asyncpg_pool
-    ):
+    async def test_execute_handles_no_count_in_result(self, postgres_settings, mocker, mock_asyncpg_pool):
         # Arrange
         mocker.patch(
             "asyncpg.create_pool",

@@ -68,9 +68,7 @@ class TelegramClient:
 
                 # Non-retryable auth errors still cause a crash as they indicate invalid secrets
                 if response.status in [401, 404]:
-                    raise ConnectionRefusedError(
-                        "Telegram Bot Token is invalid or revoked. Check secrets."
-                    )
+                    raise ConnectionRefusedError("Telegram Bot Token is invalid or revoked. Check secrets.")
                 response.raise_for_status()
 
         except (aiohttp.ClientConnectorError, asyncio.TimeoutError) as e:
@@ -104,13 +102,7 @@ class TelegramClient:
         api_url = f"https://api.telegram.org/bot{self._token}/sendMessage"
         # Telegram MarkdownV2 requires escaping of special characters.
         # This is a transport-level concern.
-        escaped_text = (
-            text.replace("-", "\\-")
-            .replace(".", "\\.")
-            .replace("!", "\\!")
-            .replace("(", "\\(")
-            .replace(")", "\\)")
-        )
+        escaped_text = text.replace("-", "\\-").replace(".", "\\.").replace("!", "\\!").replace("(", "\\(").replace(")", "\\)")
 
         payload = {
             "chat_id": self._chat_id,
@@ -118,9 +110,7 @@ class TelegramClient:
             "parse_mode": parse_mode,
         }
         try:
-            async with self._session.post(
-                api_url, json=payload, timeout=10
-            ) as response:
+            async with self._session.post(api_url, json=payload, timeout=10) as response:
                 response.raise_for_status()  # Raises for 4xx/5xx responses
                 log.debug("Successfully sent message to Telegram.")
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
@@ -129,6 +119,4 @@ class TelegramClient:
         except Exception as e:
             log.error(f"Unhandled exception during Telegram send: {e}")
             # Wrap in our custom exception to signal terminal failure
-            raise TelegramDeliveryError(
-                f"Failed to send message after retries: {e}"
-            ) from e
+            raise TelegramDeliveryError(f"Failed to send message after retries: {e}") from e

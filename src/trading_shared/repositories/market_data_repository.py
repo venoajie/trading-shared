@@ -36,9 +36,7 @@ class MarketDataRepository:
         message_dicts = [msg.model_dump(exclude_none=True) for msg in messages]
 
         await self._redis.xadd_bulk(stream_name, message_dicts, maxlen=maxlen)
-        log.debug(
-            f"Flushed batch of {len(messages)} messages to Redis stream '{stream_name}'."
-        )
+        log.debug(f"Flushed batch of {len(messages)} messages to Redis stream '{stream_name}'.")
 
     async def cache_ticker(
         self,
@@ -61,10 +59,7 @@ class MarketDataRepository:
                 return None
             return orjson.loads(payload)
         except orjson.JSONDecodeError as e:
-            log.error(
-                f"Failed to decode ticker data for '{instrument_name}'. "
-                f"Possible data corruption in Redis key '{key}'. Error: {e}"
-            )
+            log.error(f"Failed to decode ticker data for '{instrument_name}'. Possible data corruption in Redis key '{key}'. Error: {e}")
             return None
 
     async def update_realtime_candle(

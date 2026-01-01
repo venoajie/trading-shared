@@ -63,24 +63,17 @@ class DeribitWsClient(AbstractWsClient):
         if not self.instrument_names:
             records = await self.postgres_client.fetch_all_instruments()
             self.instrument_names = [
-                r["instrument_name"]
-                for r in records
-                if r["exchange"] == self.exchange_name
-                and r["market_type"] == self.market_def.market_type.value
+                r["instrument_name"] for r in records if r["exchange"] == self.exchange_name and r["market_type"] == self.market_def.market_type.value
             ]
             if not self.instrument_names:
-                log.warning(
-                    f"[{self.exchange_name}] No instruments found in DB to subscribe to."
-                )
+                log.warning(f"[{self.exchange_name}] No instruments found in DB to subscribe to.")
 
     async def _subscribe(self):
         max_instrument_load_attempts = 5
         for attempt in range(max_instrument_load_attempts):
             await self._load_instruments()
             if self.instrument_names:
-                log.info(
-                    f"[{self.exchange_name}] Successfully loaded {len(self.instrument_names)} instruments for subscription."
-                )
+                log.info(f"[{self.exchange_name}] Successfully loaded {len(self.instrument_names)} instruments for subscription.")
                 break
             else:
                 log.warning(
@@ -88,9 +81,7 @@ class DeribitWsClient(AbstractWsClient):
                 )
                 await asyncio.sleep(10)
         else:
-            log.error(
-                f"[{self.exchange_name}] Failed to load instruments after {max_instrument_load_attempts} attempts. Client will be idle."
-            )
+            log.error(f"[{self.exchange_name}] Failed to load instruments after {max_instrument_load_attempts} attempts. Client will be idle.")
             return
 
         channels = ["user.orders.any.any.raw", "user.trades.any.any.raw"]
@@ -107,9 +98,7 @@ class DeribitWsClient(AbstractWsClient):
                 "method": "private/subscribe",
                 "params": {"channels": chunk},
             }
-            log.info(
-                f"[{self.exchange_name}] Sending subscription request for {len(chunk)} channels."
-            )
+            log.info(f"[{self.exchange_name}] Sending subscription request for {len(chunk)} channels.")
             await self._send_json(msg)
 
     def _handle_control_message(self, data: dict) -> bool:
@@ -117,11 +106,7 @@ class DeribitWsClient(AbstractWsClient):
         if method == "heartbeat":
             params = data.get("params")
             if isinstance(params, dict) and params.get("type") == "test_request":
-                asyncio.create_task(
-                    self._send_json(
-                        {"jsonrpc": "2.0", "id": 0, "method": "public/test"}
-                    )
-                )
+                asyncio.create_task(self._send_json({"jsonrpc": "2.0", "id": 0, "method": "public/test"}))
             return True
         if "id" in data and "result" in data:
             log.debug(f"Received RPC confirmation for request ID {data.get('id')}")
@@ -143,9 +128,7 @@ class DeribitWsClient(AbstractWsClient):
 
         async with websockets.connect(self.ws_connection_url, ping_interval=None) as ws:
             self.websocket_client = ws
-            log.info(
-                f"[{self.exchange_name}] WebSocket connection established for '{self.market_def.market_id}'."
-            )
+            log.info(f"[{self.exchange_name}] WebSocket connection established for '{self.market_def.market_id}'.")
 
             await self._send_json(auth_msg)
             is_authenticated = False
@@ -159,13 +142,9 @@ class DeribitWsClient(AbstractWsClient):
                     if not is_authenticated:
                         if data.get("id") == AUTH_ID:
                             if "error" in data:
-                                log.error(
-                                    f"[{self.exchange_name}] Authentication failed: {data['error']}"
-                                )
+                                log.error(f"[{self.exchange_name}] Authentication failed: {data['error']}")
                                 return
-                            log.info(
-                                f"[{self.exchange_name}] Authentication successful"
-                            )
+                            log.info(f"[{self.exchange_name}] Authentication successful")
                             is_authenticated = True
                             await self._subscribe()
                         continue
@@ -174,11 +153,7 @@ class DeribitWsClient(AbstractWsClient):
                         continue
 
                     params = data.get("params")
-                    if (
-                        isinstance(params, dict)
-                        and "channel" in params
-                        and "data" in params
-                    ):
+                    if isinstance(params, dict) and "channel" in params and "data" in params:
                         yield StreamMessage(
                             exchange=self.exchange_name,
                             channel=params["channel"],
@@ -193,9 +168,7 @@ class DeribitWsClient(AbstractWsClient):
     async def process_messages(self):
         self._is_running.set()
         reconnect_attempts = 0
-        log.info(
-            f"[{self.exchange_name}] Starting message processor for '{self.market_def.market_id}'."
-        )
+        log.info(f"[{self.exchange_name}] Starting message processor for '{self.market_def.market_id}'.")
 
         while self._is_running.is_set():
             try:
@@ -208,17 +181,13 @@ class DeribitWsClient(AbstractWsClient):
                     batch.append(message.model_dump(exclude_none=True))
                     if len(batch) >= 100:
                         await self.redis_client.xadd_bulk(self.stream_name, batch)
-                        log.debug(
-                            f"[{self.exchange_name}] Flushed batch of {len(batch)} messages."
-                        )
+                        log.debug(f"[{self.exchange_name}] Flushed batch of {len(batch)} messages.")
                         batch.clear()
 
             except asyncio.CancelledError:
                 break
             except Exception:
-                log.exception(
-                    f"[{self.exchange_name}] Unhandled error in processor for '{self.market_def.market_id}'"
-                )
+                log.exception(f"[{self.exchange_name}] Unhandled error in processor for '{self.market_def.market_id}'")
             finally:
                 if self.websocket_client:
                     await self.websocket_client.close()
@@ -229,20 +198,14 @@ class DeribitWsClient(AbstractWsClient):
                     log.info(f"[{self.exchange_name}] Reconnecting in {delay:.1f}s...")
                     await asyncio.sleep(delay)
 
-        log.info(
-            f"[{self.exchange_name}] Message processor for '{self.market_def.market_id}' shut down."
-        )
+        log.info(f"[{self.exchange_name}] Message processor for '{self.market_def.market_id}' shut down.")
 
     async def close(self):
-        log.info(
-            f"[{self.exchange_name}] Closing client for '{self.market_def.market_id}'..."
-        )
+        log.info(f"[{self.exchange_name}] Closing client for '{self.market_def.market_id}'...")
         self._is_running.clear()
         if self.websocket_client:
             try:
                 await self.websocket_client.close()
             except websockets.exceptions.ConnectionClosed:
                 pass
-        log.info(
-            f"[{self.exchange_name}] Client for '{self.market_def.market_id}' closed."
-        )
+        log.info(f"[{self.exchange_name}] Client for '{self.market_def.market_id}' closed.")

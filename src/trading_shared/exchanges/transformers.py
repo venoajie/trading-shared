@@ -12,9 +12,7 @@ from loguru import logger as log
 from .mappers import get_canonical_market_type
 
 
-def transform_binance_instrument_to_canonical(
-    raw_instrument: dict[str, Any], market_type_hint: str
-) -> dict[str, Any] | None:
+def transform_binance_instrument_to_canonical(raw_instrument: dict[str, Any], market_type_hint: str) -> dict[str, Any] | None:
     """
     Transforms a single raw Binance instrument into our canonical format.
     """
@@ -27,9 +25,7 @@ def transform_binance_instrument_to_canonical(
 
     contract_type = raw_instrument.get("contractType")
 
-    canonical_market_type = get_canonical_market_type(
-        "binance", raw_instrument, source_hint=market_type_hint
-    )
+    canonical_market_type = get_canonical_market_type("binance", raw_instrument, source_hint=market_type_hint)
     market_type = canonical_market_type.value
 
     if market_type == "spot":
@@ -46,17 +42,11 @@ def transform_binance_instrument_to_canonical(
         settlement_asset = None
 
     if not settlement_asset:
-        log.warning(
-            f"Could not determine settlement_asset for {raw_instrument.get('symbol')} in market {market_type}. Skipping instrument."
-        )
+        log.warning(f"Could not determine settlement_asset for {raw_instrument.get('symbol')} in market {market_type}. Skipping instrument.")
         return None
 
     exp_ts_ms = raw_instrument.get("deliveryDate")
-    expiration_timestamp = (
-        datetime.fromtimestamp(exp_ts_ms / 1000, tz=timezone.utc).isoformat()
-        if exp_ts_ms
-        else None
-    )
+    expiration_timestamp = datetime.fromtimestamp(exp_ts_ms / 1000, tz=timezone.utc).isoformat() if exp_ts_ms else None
 
     return {
         "exchange": "binance",
@@ -89,11 +79,7 @@ def transform_deribit_instrument_to_canonical(
         instrument_kind = "unknown"
 
     exp_ts_ms = raw_instrument.get("expiration_timestamp")
-    expiration_timestamp = (
-        datetime.fromtimestamp(exp_ts_ms / 1000, tz=timezone.utc).isoformat()
-        if exp_ts_ms
-        else None
-    )
+    expiration_timestamp = datetime.fromtimestamp(exp_ts_ms / 1000, tz=timezone.utc).isoformat() if exp_ts_ms else None
     canonical_market_type = get_canonical_market_type("deribit", raw_instrument)
 
     return {
@@ -103,8 +89,7 @@ def transform_deribit_instrument_to_canonical(
         "instrument_kind": instrument_kind,
         "base_asset": raw_instrument.get("base_currency"),
         "quote_asset": raw_instrument.get("quote_currency"),
-        "settlement_asset": raw_instrument.get("settlement_currency")
-        or raw_instrument.get("base_currency"),
+        "settlement_asset": raw_instrument.get("settlement_currency") or raw_instrument.get("base_currency"),
         "settlement_period": raw_instrument.get("settlement_period"),
         "tick_size": raw_instrument.get("tick_size"),
         "contract_size": raw_instrument.get("contract_size"),

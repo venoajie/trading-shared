@@ -17,9 +17,7 @@ class SystemStateRepository:
     def __init__(self, redis_client: CustomRedisClient):
         self.redis = redis_client
 
-    async def set_active_universe(
-        self, key: str, universe_data: list[Any], ttl_seconds: int
-    ):
+    async def set_active_universe(self, key: str, universe_data: list[Any], ttl_seconds: int):
         """
         Sets the canonical trading universe state.
         """
@@ -35,10 +33,7 @@ class SystemStateRepository:
             #     f"(Redis DB: {self.redis.connection_pool.connection_kwargs.get('db', 'unknown')})"
             # )
         except Exception:
-            log.exception(
-                f"Failed to set universe state. "
-                f"Attempted to write to key '{key}' with data of type '{type(universe_data).__name__}'."
-            )
+            log.exception(f"Failed to set universe state. Attempted to write to key '{key}' with data of type '{type(universe_data).__name__}'.")
 
     async def get_active_universe(self, key: str) -> list[Any]:
         """
@@ -51,20 +46,13 @@ class SystemStateRepository:
                 # --- HOTFIX APPLIED ---
                 # The line causing the crash has been removed. The log message is preserved without the problematic attribute access.
                 # db_index = self.redis.connection_pool.connection_kwargs.get('db', 'unknown')
-                log.warning(
-                    f"Universe state key '{key}' not found or is empty in Redis. "
-                    "Analyzer may be isolated from Strategist."
-                )
+                log.warning(f"Universe state key '{key}' not found or is empty in Redis. Analyzer may be isolated from Strategist.")
                 return []
             return orjson.loads(payload)
         except Exception as e:
             # Differentiate between connection errors, missing keys, and parsing errors
             if "WRONGTYPE" in str(e):
-                log.error(
-                    f"Data Type Collision on key '{key}'. Expected STRING, found other."
-                )
+                log.error(f"Data Type Collision on key '{key}'. Expected STRING, found other.")
             else:
-                log.exception(
-                    f"Failed to get or parse universe state from key '{key}'."
-                )
+                log.exception(f"Failed to get or parse universe state from key '{key}'.")
             return []

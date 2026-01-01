@@ -23,9 +23,7 @@ class TickerRepository:
         for ticker in tickers_data:
             ts_ms = ticker.get("exchange_timestamp")
             if not ts_ms:
-                log.warning(
-                    f"Ticker for {ticker.get('instrument_name')} is missing 'exchange_timestamp'. Skipping."
-                )
+                log.warning(f"Ticker for {ticker.get('instrument_name')} is missing 'exchange_timestamp'. Skipping.")
                 continue
             ts = datetime.fromtimestamp(ts_ms / 1000, tz=UTC)
             records_to_upsert.append(

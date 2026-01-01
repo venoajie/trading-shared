@@ -50,9 +50,7 @@ class TestOhlcRepository:
         with pytest.raises(ValueError, match="Unknown resolution format: 1M"):
             ohlc_repo._parse_resolution_to_timedelta("1M")
 
-    async def test_fetch_latest_timestamp_calls_db_correctly(
-        self, ohlc_repo, mock_postgres_client
-    ):
+    async def test_fetch_latest_timestamp_calls_db_correctly(self, ohlc_repo, mock_postgres_client):
         # Arrange
         exchange = "binance"
         instrument = "BTCUSDT"
@@ -63,13 +61,9 @@ class TestOhlcRepository:
         await ohlc_repo.fetch_latest_timestamp(exchange, instrument, res_td)
 
         # Assert
-        mock_postgres_client.fetchrow.assert_awaited_once_with(
-            expected_query, exchange, instrument, res_td
-        )
+        mock_postgres_client.fetchrow.assert_awaited_once_with(expected_query, exchange, instrument, res_td)
 
-    async def test_fetch_for_instrument_calls_db_correctly(
-        self, ohlc_repo, mock_postgres_client
-    ):
+    async def test_fetch_for_instrument_calls_db_correctly(self, ohlc_repo, mock_postgres_client):
         # Arrange
         exchange = "binance"
         instrument = "BTCUSDT"
@@ -82,13 +76,9 @@ class TestOhlcRepository:
         await ohlc_repo.fetch_for_instrument(exchange, instrument, res_str, limit)
 
         # Assert
-        mock_postgres_client.fetch.assert_awaited_once_with(
-            expected_query, exchange, instrument, expected_td, limit
-        )
+        mock_postgres_client.fetch.assert_awaited_once_with(expected_query, exchange, instrument, expected_td, limit)
 
-    async def test_bulk_upsert_prepares_records_and_calls_db(
-        self, ohlc_repo, mock_postgres_client
-    ):
+    async def test_bulk_upsert_prepares_records_and_calls_db(self, ohlc_repo, mock_postgres_client):
         # Arrange
         now_ts = int(datetime.now(timezone.utc).timestamp() * 1000)
         candles = [
@@ -124,13 +114,9 @@ class TestOhlcRepository:
         await ohlc_repo.bulk_upsert(candles)
 
         # Assert
-        mock_postgres_client.execute.assert_awaited_once_with(
-            expected_query, [expected_record_tuple]
-        )
+        mock_postgres_client.execute.assert_awaited_once_with(expected_query, [expected_record_tuple])
 
-    async def test_bulk_upsert_does_nothing_if_no_candles(
-        self, ohlc_repo, mock_postgres_client
-    ):
+    async def test_bulk_upsert_does_nothing_if_no_candles(self, ohlc_repo, mock_postgres_client):
         # Arrange
         candles = []
 

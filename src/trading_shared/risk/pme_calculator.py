@@ -30,20 +30,14 @@ class PortfolioMarginCalculator:
                 if trades:
                     instrument_name = trades[0]["instrument_name"]
                     net_amount = float(position_data.get("net_amount", 0))
-                    simulated_positions[instrument_name] = (
-                        simulated_positions.get(instrument_name, 0) + net_amount
-                    )
+                    simulated_positions[instrument_name] = simulated_positions.get(instrument_name, 0) + net_amount
 
         if hypothetical_positions:
             for instrument, size in hypothetical_positions.items():
-                simulated_positions[instrument] = (
-                    simulated_positions.get(instrument, 0) + size
-                )
+                simulated_positions[instrument] = simulated_positions.get(instrument, 0) + size
 
         if not simulated_positions:
-            return MarginCalculationResult(
-                initial_margin=0.0, maintenance_margin=0.0, is_valid=True
-            )
+            return MarginCalculationResult(initial_margin=0.0, maintenance_margin=0.0, is_valid=True)
 
         response = await self.api_client.simulate_pme(simulated_positions)
 

@@ -60,9 +60,7 @@ class TestPostgresSettings:
         )
         # urllib.parse.quote_plus should encode '@' to '%40', '#' to '%23', etc.
         expected_encoded_password = "p%40ssw%23rd%24123"
-        expected_dsn = (
-            f"postgresql://test_user:{expected_encoded_password}@localhost:5432/test_db"
-        )
+        expected_dsn = f"postgresql://test_user:{expected_encoded_password}@localhost:5432/test_db"
 
         # Act
         dsn = settings.dsn

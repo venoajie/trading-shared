@@ -48,9 +48,7 @@ class BinanceWsClient(AbstractWsClient):
         self._ws: websockets.WebSocketClientProtocol | None = None
         self.shard_num_for_log = self.shard_id + 1
 
-    async def _get_channels_from_universe(
-        self, universe: list[dict[str, any]]
-    ) -> set[str]:
+    async def _get_channels_from_universe(self, universe: list[dict[str, any]]) -> set[str]:
         """
         Parses the rich universe object to extract symbols
         for this client's specific shard.
@@ -65,11 +63,7 @@ class BinanceWsClient(AbstractWsClient):
                 if symbol := asset_pair.get("perp_symbol"):
                     my_targets.add(symbol)
 
-        sharded_targets = {
-            symbol
-            for i, symbol in enumerate(sorted(list(my_targets)))
-            if i % self.total_shards == self.shard_id
-        }
+        sharded_targets = {symbol for i, symbol in enumerate(sorted(my_targets)) if i % self.total_shards == self.shard_id}
         return {f"{symbol.lower()}@trade" for symbol in sharded_targets}
 
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
@@ -81,16 +75,14 @@ class BinanceWsClient(AbstractWsClient):
             log.warning(f"[{self.market_def.market_id}] No channels to connect to.")
             return
 
-        sorted_channels = sorted(list(self._active_channels))
+        sorted_channels = sorted(self._active_channels)
         url_path = "/stream?streams=" + "/".join(sorted_channels)
         full_url = self.ws_connection_url + url_path
 
         try:
             async with websockets.connect(full_url, ping_interval=180) as ws:
                 self._ws = ws
-                log.success(
-                    f"[{self.market_def.market_id}_{self.shard_num_for_log}] Shard Connected."
-                )
+                log.success(f"[{self.market_def.market_id}_{self.shard_num_for_log}] Shard Connected.")
 
                 async for message in ws:
                     try:
@@ -123,15 +115,11 @@ class BinanceWsClient(AbstractWsClient):
         """Inner loop to consume from the generator and write to Redis."""
         try:
             async for message in self.connect():
-                await self.market_data_repo.add_messages_to_stream(
-                    self.stream_name, [message]
-                )
+                await self.market_data_repo.add_messages_to_stream(self.stream_name, [message])
         except asyncio.CancelledError:
             pass  # Normal shutdown
         except Exception:
-            log.exception(
-                f"[{self.market_def.market_id}] Unhandled error in message batch processor."
-            )
+            log.exception(f"[{self.market_def.market_id}] Unhandled error in message batch processor.")
 
     async def process_messages(self):
         """

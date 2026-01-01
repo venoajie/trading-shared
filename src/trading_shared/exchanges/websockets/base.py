@@ -30,34 +30,22 @@ class AbstractWsClient(ABC):
         self.total_shards = total_shards
 
         if not self.stream_name:
-            raise ValueError(
-                f"[{self.exchange_name}] 'output_stream_name' must be provided in MarketDefinition."
-            )
+            raise ValueError(f"[{self.exchange_name}] 'output_stream_name' must be provided in MarketDefinition.")
 
         self._active_channels: set[str] = set()
         self._is_running = asyncio.Event()
         self._reconnect_event = asyncio.Event()
 
     async def _maintain_subscriptions(self, poll_interval_s: int = 30):
-        if (
-            not hasattr(self, "system_state_repo")
-            or not self.system_state_repo
-            or not self.universe_state_key
-        ):
-            log.warning(
-                f"[{self.market_def.market_id}] Dynamic subscriptions disabled (missing config)."
-            )
+        if not hasattr(self, "system_state_repo") or not self.system_state_repo or not self.universe_state_key:
+            log.warning(f"[{self.market_def.market_id}] Dynamic subscriptions disabled (missing config).")
             return
 
-        log.info(
-            f"[{self.market_def.market_id}] Starting subscription manager (Shard {self.shard_id + 1}/{self.total_shards})."
-        )
+        log.info(f"[{self.market_def.market_id}] Starting subscription manager (Shard {self.shard_id + 1}/{self.total_shards}).")
 
         async def _update():
             try:
-                universe = await self.system_state_repo.get_active_universe(
-                    self.universe_state_key
-                )
+                universe = await self.system_state_repo.get_active_universe(self.universe_state_key)
                 needed_channels = await self._get_channels_from_universe(universe)
 
                 if needed_channels != self._active_channels:
@@ -89,13 +77,12 @@ class AbstractWsClient(ABC):
         """Maps canonical universe symbols to exchange-specific channel names for this shard."""
         pass
 
-    # [REMOVED] @abstractmethod decorator. These methods are now optional.
-    async def _send_subscribe(self, channels: list[str]):
+    async def _send_subscribe(self, channels: list[str]):  # noqa: B027
         # [MODIFIED] Provide a default no-op implementation.
         pass
 
     # [REMOVED] @abstractmethod decorator. These methods are now optional.
-    async def _send_unsubscribe(self, channels: list[str]):
+    async def _send_unsubscribe(self, channels: list[str]):  # noqa: B027
         # [MODIFIED] Provide a default no-op implementation.
         pass
 

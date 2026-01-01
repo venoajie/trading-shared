@@ -11,9 +11,7 @@ class RedisSettings(BaseModel):
     url: str
     db: int
     password: SecretStr | None = None
-    write_concurrency_limit: int = Field(
-        default=4, description="Concurrency limit for bulk write operations to Redis."
-    )
+    write_concurrency_limit: int = Field(default=4, description="Concurrency limit for bulk write operations to Redis.")
     socket_connect_timeout: int = Field(
         default=2,
         description="Timeout in seconds for establishing a new Redis connection.",
@@ -26,12 +24,8 @@ class RedisSettings(BaseModel):
         default=50,
         description="Maximum number of connections in the PubSub pool. Must exceed Total_Instruments / 200.",
     )
-    max_retries: int = Field(
-        default=3, description="Maximum number of retries for a resilient command."
-    )
-    initial_retry_delay_s: float = Field(
-        default=0.5, description="Initial delay in seconds for exponential backoff."
-    )
+    max_retries: int = Field(default=3, description="Maximum number of retries for a resilient command.")
+    initial_retry_delay_s: float = Field(default=0.5, description="Initial delay in seconds for exponential backoff.")
 
 
 class PostgresSettings(BaseModel):
@@ -40,21 +34,11 @@ class PostgresSettings(BaseModel):
     host: str
     port: int
     db: str
-    pool_min_size: int = Field(
-        default=1, description="Minimum number of connections in the PostgreSQL pool."
-    )
-    pool_max_size: int = Field(
-        default=2, description="Maximum number of connections in the PostgreSQL pool."
-    )
-    command_timeout: int = Field(
-        default=30, description="Default timeout in seconds for PostgreSQL commands."
-    )
-    max_retries: int = Field(
-        default=3, description="Maximum number of retries for a resilient command."
-    )
-    initial_retry_delay_s: float = Field(
-        default=0.5, description="Initial delay in seconds for exponential backoff."
-    )
+    pool_min_size: int = Field(default=1, description="Minimum number of connections in the PostgreSQL pool.")
+    pool_max_size: int = Field(default=2, description="Maximum number of connections in the PostgreSQL pool.")
+    command_timeout: int = Field(default=30, description="Default timeout in seconds for PostgreSQL commands.")
+    max_retries: int = Field(default=3, description="Maximum number of retries for a resilient command.")
+    initial_retry_delay_s: float = Field(default=0.5, description="Initial delay in seconds for exponential backoff.")
 
     @computed_field
     @property

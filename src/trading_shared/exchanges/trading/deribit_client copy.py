@@ -59,13 +59,9 @@ class DeribitTradingClient:
             except TokenExpiredError:
                 # If the token is expired, acquire the lock to prevent multiple concurrent re-logins
                 async with self._auth_lock:
-                    log.warning(
-                        f"Access token expired during call to '{func.__name__}'. Re-authenticating."
-                    )
+                    log.warning(f"Access token expired during call to '{func.__name__}'. Re-authenticating.")
                     await self.login()
-                    log.info(
-                        f"Re-authentication successful. Retrying call to '{func.__name__}'."
-                    )
+                    log.info(f"Re-authentication successful. Retrying call to '{func.__name__}'.")
                     # Second and final attempt after re-login
                     return await func(self, *args, **kwargs)
 
@@ -76,9 +72,7 @@ class DeribitTradingClient:
     async def connect(self):
         """Establishes the aiohttp client session and authenticates."""
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                json_serialize=lambda data: orjson.dumps(data).decode()
-            )
+            self._session = aiohttp.ClientSession(json_serialize=lambda data: orjson.dumps(data).decode())
             log.info("Aiohttp session established for Deribit API.")
             # Initial login on connect
             await self.login()
@@ -107,13 +101,9 @@ class DeribitTradingClient:
                 data = await response.json()
                 if "result" in data and "access_token" in data["result"]:
                     self._access_token = data["result"]["access_token"]
-                    log.success(
-                        "Successfully authenticated with Deribit and obtained access token."
-                    )
+                    log.success("Successfully authenticated with Deribit and obtained access token.")
                 else:
-                    log.error(
-                        f"Deribit authentication failed: {data.get('error', 'Unknown error')}"
-                    )
+                    log.error(f"Deribit authentication failed: {data.get('error', 'Unknown error')}")
                     self._access_token = None
         except aiohttp.ClientError as e:
             log.critical(f"HTTP error during authentication: {e}")
@@ -135,11 +125,7 @@ class DeribitTradingClient:
         if not self._session or self._session.closed:
             raise ConnectionError("Session is not active.")
 
-        headers = (
-            {"Authorization": f"bearer {self._access_token}"}
-            if self._access_token
-            else {}
-        )
+        headers = {"Authorization": f"bearer {self._access_token}"} if self._access_token else {}
         payload = {
             "jsonrpc": "2.0",
             "id": int(time.time() * 1000),
@@ -194,9 +180,7 @@ class DeribitTradingClient:
             "end_timestamp": end_timestamp,
             "resolution": resolution,
         }
-        return await self._perform_request(
-            ApiMethods.GET_TRADINGVIEW_CHART_DATA, params
-        )
+        return await self._perform_request(ApiMethods.GET_TRADINGVIEW_CHART_DATA, params)
 
     @_ensure_authenticated
     async def get_subaccounts_details(
@@ -211,9 +195,7 @@ class DeribitTradingClient:
     @_ensure_authenticated
     async def cancel_order(self, order_id: str) -> dict[str, Any]:
         log.info(f"[API CALL] Attempting to cancel order: {order_id}")
-        return await self._perform_request(
-            ApiMethods.CANCEL_ORDER, {"order_id": order_id}
-        )
+        return await self._perform_request(ApiMethods.CANCEL_ORDER, {"order_id": order_id})
 
     @_ensure_authenticated
     async def create_order(
@@ -238,9 +220,7 @@ class DeribitTradingClient:
         Sends a request to create a paired OTO (One-Triggers-Other) order.
         """
         client_order_id = params.get("label")
-        log.info(
-            f"[API CALL] Attempting to create OTO order with client_id: {client_order_id}"
-        )
+        log.info(f"[API CALL] Attempting to create OTO order with client_id: {client_order_id}")
 
         side = params.get("side")
         if not side:
@@ -258,13 +238,9 @@ class DeribitTradingClient:
         response = await self._perform_request(endpoint, payload_params)
 
         if response.get("success"):
-            log.success(
-                f"[API RESPONSE] Successfully processed OTO create for order: {client_order_id}."
-            )
+            log.success(f"[API RESPONSE] Successfully processed OTO create for order: {client_order_id}.")
         else:
-            log.error(
-                f"[API RESPONSE] Failed to create OTO order for {client_order_id}. Error: {response.get('error')}"
-            )
+            log.error(f"[API RESPONSE] Failed to create OTO order for {client_order_id}. Error: {response.get('error')}")
         return response
 
     @_ensure_authenticated
@@ -275,9 +251,7 @@ class DeribitTradingClient:
         """Fetches all open orders for a given currency."""
         log.info(f"[API CALL] Fetching open orders for currency: {currency}")
 
-        return await self._perform_request(
-            ApiMethods.GET_OPEN_ORDERS_BY_CURRENCY, {"currency": currency}
-        )
+        return await self._perform_request(ApiMethods.GET_OPEN_ORDERS_BY_CURRENCY, {"currency": currency})
 
     @_ensure_authenticated
     async def get_account_summary(
@@ -287,9 +261,7 @@ class DeribitTradingClient:
         """Fetches account summary, including equity. Unwraps the response object."""
         log.info(f"[API CALL] Fetching account summary for currency: {currency}")
 
-        response = await self._perform_request(
-            ApiMethods.GET_ACCOUNT_SUMMARY, {"currency": currency}
-        )
+        response = await self._perform_request(ApiMethods.GET_ACCOUNT_SUMMARY, {"currency": currency})
 
         if response and response.get("success"):
             return response.get("data")
@@ -308,9 +280,7 @@ class DeribitTradingClient:
         continuation: str = None,
     ) -> dict[str, Any]:
         """Fetches the transaction log for a given period."""
-        log.info(
-            f"[API CALL] Fetching transaction log for {currency} from {start_timestamp} to {end_timestamp}"
-        )
+        log.info(f"[API CALL] Fetching transaction log for {currency} from {start_timestamp} to {end_timestamp}")
         params = {
             "currency": currency,
             "start_timestamp": start_timestamp,
@@ -334,9 +304,7 @@ class DeribitTradingClient:
         """Fetches user trades for a specific order ID."""
         log.debug(f"[API CALL] Fetching trades for order_id: {order_id}")
 
-        return await self._perform_request(
-            ApiMethods.GET_USER_TRADES_BY_ORDER, {"order_id": order_id}
-        )
+        return await self._perform_request(ApiMethods.GET_USER_TRADES_BY_ORDER, {"order_id": order_id})
 
     @_ensure_authenticated
     async def simulate_pme(
@@ -346,9 +314,7 @@ class DeribitTradingClient:
         """
         Calls the private/pme/simulate endpoint to get official margin calculations.
         """
-        log.info(
-            f"[API CALL] Simulating PME for portfolio with {len(positions)} positions."
-        )
+        log.info(f"[API CALL] Simulating PME for portfolio with {len(positions)} positions.")
         params = {
             "currency": "CROSS",
             "add_positions": True,

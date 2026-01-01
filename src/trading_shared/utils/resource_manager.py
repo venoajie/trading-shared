@@ -51,13 +51,9 @@ async def managed_resources(resources: Iterable[Any]) -> AsyncGenerator[None, No
                     await resource.close()
                 # If no cleanup method is found, do nothing.
                 else:
-                    log.trace(
-                        f"Resource '{resource_name}' has no cleanup method (__aexit__ or close). Skipping."
-                    )
+                    log.trace(f"Resource '{resource_name}' has no cleanup method (__aexit__ or close). Skipping.")
 
             except Exception:
                 # Log but do not re-raise. Ensures a failure in closing one
                 # resource does not prevent others from being closed.
-                log.exception(
-                    f"A non-critical error occurred while closing resource: '{resource_name}'"
-                )
+                log.exception(f"A non-critical error occurred while closing resource: '{resource_name}'")

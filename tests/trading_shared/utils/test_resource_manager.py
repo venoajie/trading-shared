@@ -85,9 +85,7 @@ async def test_managed_resources_continues_closing_if_one_fails(mocker):
     res2.close.side_effect = ValueError("Failed to close")
 
     # Spy on the log to ensure the error is logged
-    log_spy = mocker.spy(
-        mocker.patch("trading_shared.utils.resource_manager.log"), "exception"
-    )
+    log_spy = mocker.spy(mocker.patch("trading_shared.utils.resource_manager.log"), "exception")
 
     # Act
     # The context manager should suppress the exception from close()
@@ -100,9 +98,7 @@ async def test_managed_resources_continues_closing_if_one_fails(mocker):
     res2.close.assert_awaited_once()
 
     # Verify that the exception was logged
-    log_spy.assert_called_once_with(
-        "A non-critical error occurred while closing resource: 'MockCloseableResource'"
-    )
+    log_spy.assert_called_once_with("A non-critical error occurred while closing resource: 'MockCloseableResource'")
 
 
 @pytest.mark.asyncio

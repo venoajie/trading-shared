@@ -82,6 +82,4 @@ class OhlcRepository:
         if not candles:
             return
         records = [self._prepare_ohlc_record(c) for c in candles]
-        await self._db.execute(
-            "SELECT bulk_upsert_ohlc($1::ohlc_upsert_type[])", records
-        )
+        await self._db.execute("SELECT bulk_upsert_ohlc($1::ohlc_upsert_type[])", records)

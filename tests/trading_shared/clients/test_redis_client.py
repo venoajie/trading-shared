@@ -35,9 +35,7 @@ def mock_aioredis(mocker):
     mock_redis.hgetall = AsyncMock(return_value={b"field": b"value"})
     mock_redis.hset = AsyncMock()
     mock_redis.xack = AsyncMock()
-    mock_redis.xreadgroup = AsyncMock(
-        return_value=[(b"test:stream", [(b"123-0", {b"data": b'{"val": 1}'})])]
-    )
+    mock_redis.xreadgroup = AsyncMock(return_value=[(b"test:stream", [(b"123-0", {b"data": b'{"val": 1}'})])])
 
     # Mock the pipeline
     mock_pipeline = MagicMock(spec=aioredis.client.Pipeline)
@@ -52,13 +50,9 @@ def mock_aioredis(mocker):
 class TestCustomRedisClient:
     """Unit tests for the CustomRedisClient."""
 
-    async def test_get_client_creates_instance(
-        self, redis_settings, mocker, mock_aioredis
-    ):
+    async def test_get_client_creates_instance(self, redis_settings, mocker, mock_aioredis):
         # Arrange
-        mock_from_url = mocker.patch(
-            "redis.asyncio.from_url", return_value=mock_aioredis
-        )
+        mock_from_url = mocker.patch("redis.asyncio.from_url", return_value=mock_aioredis)
         client = CustomRedisClient(redis_settings)
 
         # Act
@@ -75,9 +69,7 @@ class TestCustomRedisClient:
         mock_aioredis.ping.assert_awaited_once()
         assert redis_conn == mock_aioredis
 
-    async def test_execute_resiliently_retries_on_connection_error(
-        self, redis_settings, mocker, mock_aioredis
-    ):
+    async def test_execute_resiliently_retries_on_connection_error(self, redis_settings, mocker, mock_aioredis):
         # Arrange
         # Simulate failure then success
         mock_from_url = mocker.patch(
@@ -95,9 +87,7 @@ class TestCustomRedisClient:
         assert asyncio.sleep.call_count == 1
         assert result == b'{"key":"value"}'
 
-    async def test_execute_resiliently_fails_after_max_retries(
-        self, redis_settings, mocker
-    ):
+    async def test_execute_resiliently_fails_after_max_retries(self, redis_settings, mocker):
         # Arrange
         mocker.patch("redis.asyncio.from_url", side_effect=RedisConnectionError)
         mocker.patch("asyncio.sleep", AsyncMock())
@@ -110,9 +100,7 @@ class TestCustomRedisClient:
         assert mocker.patch("redis.asyncio.from_url").call_count == 2
         assert asyncio.sleep.call_count == 1
 
-    async def test_xadd_bulk_chunks_messages(
-        self, redis_settings, mocker, mock_aioredis
-    ):
+    async def test_xadd_bulk_chunks_messages(self, redis_settings, mocker, mock_aioredis):
         # Arrange
         mocker.patch("redis.asyncio.from_url", return_value=mock_aioredis)
         client = CustomRedisClient(redis_settings)
@@ -129,18 +117,14 @@ class TestCustomRedisClient:
         # xadd should be called for each message
         assert mock_pipeline.xadd.call_count == 501
 
-    async def test_xadd_bulk_moves_to_dlq_on_final_failure(
-        self, redis_settings, mocker
-    ):
+    async def test_xadd_bulk_moves_to_dlq_on_final_failure(self, redis_settings, mocker):
         # Arrange
         mocker.patch("redis.asyncio.from_url", side_effect=RedisConnectionError)
         mocker.patch("asyncio.sleep", AsyncMock())
         client = CustomRedisClient(redis_settings)
 
         # Mock the DLQ method to spy on it
-        mock_xadd_to_dlq = mocker.patch.object(
-            client, "xadd_to_dlq", new_callable=AsyncMock
-        )
+        mock_xadd_to_dlq = mocker.patch.object(client, "xadd_to_dlq", new_callable=AsyncMock)
 
         messages = [{"key": 1}]
 
@@ -165,9 +149,7 @@ class TestCustomRedisClient:
         log_message = call_args[0][1]  # Second positional argument
         assert "deadletter:queue:market:stream" in log_message
 
-    async def test_read_stream_messages_parses_response(
-        self, redis_settings, mocker, mock_aioredis
-    ):
+    async def test_read_stream_messages_parses_response(self, redis_settings, mocker, mock_aioredis):
         # Arrange
         mocker.patch("redis.asyncio.from_url", return_value=mock_aioredis)
         client = CustomRedisClient(redis_settings)
@@ -178,9 +160,7 @@ class TestCustomRedisClient:
         # Assert
         assert messages == [(b"123-0", {b"data": b'{"val": 1}'})]
 
-    async def test_read_stream_messages_handles_empty_response(
-        self, redis_settings, mocker, mock_aioredis
-    ):
+    async def test_read_stream_messages_handles_empty_response(self, redis_settings, mocker, mock_aioredis):
         # Arrange
         mock_aioredis.xreadgroup = AsyncMock(return_value=[])  # Simulate timeout
         mocker.patch("redis.asyncio.from_url", return_value=mock_aioredis)
