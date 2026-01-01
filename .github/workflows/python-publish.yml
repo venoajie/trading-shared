@@ -38,6 +38,8 @@ jobs:
           ruff check .
           ruff format --check .
       - name: Test with Pytest and generate coverage report
+        env:
+          PYTHONPATH: src
         run: |
           pytest \
             --cov=src \
