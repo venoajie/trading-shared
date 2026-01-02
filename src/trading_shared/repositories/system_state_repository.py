@@ -25,16 +25,19 @@ class SystemStateRepository:
             # Serialized to a JSON string (bytes) before setting.
             payload = orjson.dumps(universe_data)
             await self.redis.set(key, payload, ex=ttl_seconds)
-            # --- HOTFIX APPLIED ---
-            # The line below was removed as self.redis is a wrapper without a direct .connection_pool attribute.
-            # This prevents a runtime error if logging is enabled at a higher level.
-            # log.debug(
-            #     f"Set universe state for key '{key}' with {len(universe_data)} instruments. "
-            #     f"(Redis DB: {self.redis.connection_pool.connection_kwargs.get('db', 'unknown')})"
-            # )
+
         except Exception:
             log.exception(f"Failed to set universe state. Attempted to write to key '{key}' with data of type '{type(universe_data).__name__}'.")
 
+    async def set_active_ledger(self, key: str, ledger_data: list[Any], ttl_seconds: int):
+        """
+        Sets the canonical instrument ledger state. This is an alias for
+        set_active_universe to provide semantic clarity.
+        """
+        log.info(f"Publishing active ledger with {len(ledger_data)} instruments to Redis key '{key}'.")
+        # This method simply calls the existing, tested method.
+        await self.set_active_universe(key, ledger_data, ttl_seconds)
+        
     async def get_active_universe(self, key: str) -> list[Any]:
         """
         Gets the canonical trading universe from a specified Redis key.
@@ -43,14 +46,10 @@ class SystemStateRepository:
         try:
             payload = await self.redis.get(key)
             if not payload:
-                # --- HOTFIX APPLIED ---
-                # The line causing the crash has been removed. The log message is preserved without the problematic attribute access.
-                # db_index = self.redis.connection_pool.connection_kwargs.get('db', 'unknown')
-                log.warning(f"Universe state key '{key}' not found or is empty in Redis. Analyzer may be isolated from Strategist.")
+                log.warning(f"Universe state key '{key}' not found or is empty in Redis.")
                 return []
             return orjson.loads(payload)
         except Exception as e:
-            # Differentiate between connection errors, missing keys, and parsing errors
             if "WRONGTYPE" in str(e):
                 log.error(f"Data Type Collision on key '{key}'. Expected STRING, found other.")
             else:
