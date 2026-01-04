@@ -1,3 +1,4 @@
+
 # src/trading_shared/exchanges/public/binance.py
 
 # --- Built Ins ---
@@ -47,6 +48,29 @@ class BinancePublicClient(PublicClient):
             return BinanceMarketType.FUTURES_USD_M
         return BinanceMarketType.SPOT
 
+    def _map_resolution_to_api_format(self, resolution: str) -> str:
+        """
+        Maps internal resolution strings (1, 60, 1D) to Binance API format (1m, 1h, 1d).
+        """
+        mapping = {
+            "1": "1m",
+            "3": "3m",
+            "5": "5m",
+            "15": "15m",
+            "30": "30m",
+            "60": "1h",
+            "120": "2h",
+            "240": "4h",
+            "360": "6h",
+            "480": "8h",
+            "720": "12h",
+            "1D": "1d",
+            "1W": "1w",
+            "1M": "1M"
+        }
+        # Return mapped value, or default to the input if it already looks like a binance format (e.g. "1m")
+        return mapping.get(str(resolution), resolution)
+
     def _transform_candle_data_to_canonical(
         self,
         raw_candle: list,
@@ -56,9 +80,6 @@ class BinancePublicClient(PublicClient):
     ) -> dict[str, Any]:
         """
         Transforms a single raw candle from Binance API into our standard dict format.
-
-        Refactored for Microstructure Alpha:
-        Extracts Taker Buy Volume (Index 9) to calculate Taker Sell Volume.
         """
         total_vol = float(raw_candle[5])
         taker_buy_vol = float(raw_candle[9])
@@ -66,14 +87,13 @@ class BinancePublicClient(PublicClient):
         # Logic: Total = TakerBuy + TakerSell -> TakerSell = Total - TakerBuy
         taker_sell_vol = total_vol - taker_buy_vol
 
-        # Floating point sanity check
         if taker_sell_vol < 0:
             taker_sell_vol = 0.0
 
         return {
             "exchange": exchange,
             "instrument_name": instrument_name,
-            "resolution": resolution,
+            "resolution": resolution, # Keep internal resolution for DB consistency
             "tick": int(raw_candle[0]),
             "open": float(raw_candle[1]),
             "high": float(raw_candle[2]),
@@ -94,23 +114,30 @@ class BinancePublicClient(PublicClient):
         limit: int,
     ) -> list[dict[str, Any]]:
         """
-        Private method to repeatedly call the klines endpoint to fetch all candles
-        from a start time until the present.
+        Private method to repeatedly call the klines endpoint.
         """
         all_candles = []
         next_start_time_ms = start_timestamp_ms
         hit_safety_limit = True
+        
+        # [FIX] Convert resolution to API format
+        api_resolution = self._map_resolution_to_api_format(resolution)
 
         for _ in range(self._SAFETY_FETCH_LIMIT):
             params = {
                 "symbol": instrument_name.replace("/", ""),
-                "interval": resolution,
+                "interval": api_resolution,
                 "startTime": next_start_time_ms,
                 "limit": limit,
             }
 
             try:
                 async with self.http_session.get(f"{api_url}/klines", params=params) as response:
+                    if response.status == 400:
+                        log.error(f"Binance 400 Bad Request for {instrument_name}. Likely invalid symbol or interval: {params}")
+                        hit_safety_limit = False
+                        break
+                        
                     response.raise_for_status()
                     raw_candles = await response.json()
 
