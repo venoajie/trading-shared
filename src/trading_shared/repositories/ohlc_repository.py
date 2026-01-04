@@ -27,7 +27,7 @@ class OhlcRepository:
             if resolution.upper().endswith("H"):
                 return timedelta(hours=int(resolution[:-1]))
             return timedelta(minutes=int(resolution))
-        except ValueError as e:
+        except ValueError:
             log.warning(f"Could not parse resolution '{resolution}', defaulting to minutes.")
             # Fallback for formats like "1", "5", "60"
             return timedelta(minutes=int(resolution))
@@ -36,14 +36,14 @@ class OhlcRepository:
         """
         Prepares a single candle dictionary into a tuple that EXACTLY matches
         the 'ohlc_upsert_type' composite type in PostgreSQL.
-        
+
         CORRECTED: Now includes taker_buy_volume and taker_sell_volume.
         """
         # The tick from upstream sources is a millisecond timestamp.
         # datetime.fromtimestamp expects seconds.
         tick_dt = datetime.fromtimestamp(candle_data["tick"] / 1000, tz=UTC)
         resolution_td = self._parse_resolution_to_timedelta(candle_data["resolution"])
-        
+
         return (
             candle_data["exchange"],
             candle_data["instrument_name"],
@@ -86,7 +86,7 @@ class OhlcRepository:
     async def bulk_upsert(self, candles: list[dict[str, Any]]):
         if not candles:
             return
-            
+
         try:
             records = [self._prepare_ohlc_record(c) for c in candles]
             await self._db.execute("SELECT bulk_upsert_ohlc($1::ohlc_upsert_type[])", records)
