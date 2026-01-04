@@ -1,4 +1,3 @@
-
 # src/trading_shared/exchanges/public/binance.py
 
 # --- Built Ins ---
@@ -66,7 +65,7 @@ class BinancePublicClient(PublicClient):
             "720": "12h",
             "1D": "1d",
             "1W": "1w",
-            "1M": "1M"
+            "1M": "1M",
         }
         # Return mapped value, or default to the input if it already looks like a binance format (e.g. "1m")
         return mapping.get(str(resolution), resolution)
@@ -93,7 +92,7 @@ class BinancePublicClient(PublicClient):
         return {
             "exchange": exchange,
             "instrument_name": instrument_name,
-            "resolution": resolution, # Keep internal resolution for DB consistency
+            "resolution": resolution,  # Keep internal resolution for DB consistency
             "tick": int(raw_candle[0]),
             "open": float(raw_candle[1]),
             "high": float(raw_candle[2]),
@@ -119,7 +118,7 @@ class BinancePublicClient(PublicClient):
         all_candles = []
         next_start_time_ms = start_timestamp_ms
         hit_safety_limit = True
-        
+
         # [FIX] Convert resolution to API format
         api_resolution = self._map_resolution_to_api_format(resolution)
 
@@ -137,7 +136,7 @@ class BinancePublicClient(PublicClient):
                         log.error(f"Binance 400 Bad Request for {instrument_name}. Likely invalid symbol or interval: {params}")
                         hit_safety_limit = False
                         break
-                        
+
                     response.raise_for_status()
                     raw_candles = await response.json()
 
