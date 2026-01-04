@@ -37,7 +37,7 @@ class SystemStateRepository:
         log.info(f"Publishing active ledger with {len(ledger_data)} instruments to Redis key '{key}'.")
         # This method simply calls the existing, tested method.
         await self.set_active_universe(key, ledger_data, ttl_seconds)
-        
+
     async def get_active_universe(self, key: str) -> list[Any]:
         """
         Gets the canonical trading universe from a specified Redis key.

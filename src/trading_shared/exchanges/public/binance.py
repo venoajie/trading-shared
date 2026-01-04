@@ -42,7 +42,6 @@ class BinancePublicClient(PublicClient):
             return self.linear_futures_url
         return self.spot_url
 
-    # A placeholder for the detection logic mentioned above
     def get_market_type_from_instrument_name(self, instrument_name: str) -> BinanceMarketType:
         if "PERP" in instrument_name:
             return BinanceMarketType.FUTURES_USD_M
@@ -55,7 +54,22 @@ class BinancePublicClient(PublicClient):
         instrument_name: str,
         resolution: str,
     ) -> dict[str, Any]:
-        """Transforms a single raw candle from Binance API into our standard dict format."""
+        """
+        Transforms a single raw candle from Binance API into our standard dict format.
+
+        Refactored for Microstructure Alpha:
+        Extracts Taker Buy Volume (Index 9) to calculate Taker Sell Volume.
+        """
+        total_vol = float(raw_candle[5])
+        taker_buy_vol = float(raw_candle[9])
+
+        # Logic: Total = TakerBuy + TakerSell -> TakerSell = Total - TakerBuy
+        taker_sell_vol = total_vol - taker_buy_vol
+
+        # Floating point sanity check
+        if taker_sell_vol < 0:
+            taker_sell_vol = 0.0
+
         return {
             "exchange": exchange,
             "instrument_name": instrument_name,
@@ -65,7 +79,10 @@ class BinancePublicClient(PublicClient):
             "high": float(raw_candle[2]),
             "low": float(raw_candle[3]),
             "close": float(raw_candle[4]),
-            "volume": float(raw_candle[5]),
+            "volume": total_vol,
+            # Microstructure Vectors
+            "taker_buy_volume": taker_buy_vol,
+            "taker_sell_volume": taker_sell_vol,
         }
 
     async def _perform_paginated_ohlc_fetch(
@@ -82,8 +99,6 @@ class BinancePublicClient(PublicClient):
         """
         all_candles = []
         next_start_time_ms = start_timestamp_ms
-
-        # 1. Assume the loop will hit the safety limit unless a clean exit occurs.
         hit_safety_limit = True
 
         for _ in range(self._SAFETY_FETCH_LIMIT):
@@ -101,7 +116,6 @@ class BinancePublicClient(PublicClient):
 
                     if not raw_candles:
                         log.info(f"[{instrument_name}] No more candles returned. Pagination complete.")
-                        # 2. Set flag to False on clean exit.
                         hit_safety_limit = False
                         break
 
@@ -115,7 +129,6 @@ class BinancePublicClient(PublicClient):
 
                     if len(raw_candles) < limit:
                         log.info(f"[{instrument_name}] Reached end of available data. Pagination complete.")
-                        # 3. Set flag to False on clean exit.
                         hit_safety_limit = False
                         break
 
@@ -123,14 +136,13 @@ class BinancePublicClient(PublicClient):
 
             except aiohttp.ClientError as e:
                 log.error(f"API call failed for {instrument_name}: {e}")
-                hit_safety_limit = False  # Also considered a form of exit
+                hit_safety_limit = False
                 break
             except Exception:
                 log.exception(f"An unexpected error occurred during OHLC fetch for {instrument_name}")
-                hit_safety_limit = False  # Also considered a form of exit
+                hit_safety_limit = False
                 break
 
-        # 4. Check the flag's final state *after* the loop is finished.
         if hit_safety_limit:
             log.warning(f"Hit safety fetch limit for {instrument_name}. More data may be available.")
 
@@ -145,8 +157,6 @@ class BinancePublicClient(PublicClient):
     ) -> list[dict[str, Any]]:
         """
         Public method to fetch OHLC (k-line) data for a symbol.
-        It automatically handles pagination to retrieve all available data from the
-        start time until the present.
         """
         api_url = self._get_api_url_for_instrument(instrument_name)
         log.info(f"Starting paginated OHLC fetch for {instrument_name} on {api_url}...")
@@ -160,15 +170,12 @@ class BinancePublicClient(PublicClient):
         )
 
     async def connect(self):
-        """The shared session is managed externally. This method is a no-op."""
         pass
 
     async def close(self):
-        """The shared session is managed externally. This method is a no-op."""
         pass
 
     async def _get_raw_exchange_info_for_market(self, market_type_url: str, market_type_name: str) -> list[dict[str, Any]]:
-        """Fetches the raw, untransformed exchange info for a single given market type."""
         try:
             url = f"{market_type_url}/exchangeInfo"
             async with self.http_session.get(url, timeout=20) as response:
@@ -183,10 +190,6 @@ class BinancePublicClient(PublicClient):
             return []
 
     async def get_instruments(self, currencies: list[str]) -> list[dict[str, Any]]:
-        """
-        Fetches instrument details for all supported market types.
-        The 'currencies' argument is ignored as Binance API does not filter by currency.
-        """
         log.info("[BinancePublicClient] Fetching instruments for all market types...")
         markets_to_query = {
             "spot": self.spot_url,
@@ -196,7 +199,6 @@ class BinancePublicClient(PublicClient):
 
         tasks = [self._get_raw_exchange_info_for_market(url, name) for name, url in markets_to_query.items()]
         results_by_market = await asyncio.gather(*tasks)
-
         all_instruments = [inst for market_list in results_by_market for inst in market_list]
 
         log.success(f"[BinancePublicClient] Total raw instruments fetched: {len(all_instruments)}")
