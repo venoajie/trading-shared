@@ -1,21 +1,24 @@
 # src/trading_shared/config/universe_config.py
 
-from typing import List, Dict, Set
+from typing import List, Dict, Set, Optional
 from pydantic import BaseModel, Field
 from trading_engine_core.enums import MarketType
 
 class HardFilterSettings(BaseModel):
-    min_daily_volume: float = Field(default=1_000_000.0)
+    min_ingestion_volume: float = Field(default=100_000.0)
     blacklist_assets: Set[str] = Field(default_factory=set)
     ignore_stable_pairs: bool = Field(default=True)
     stablecoins: Set[str] = Field(default_factory=set)
 
 class TierSettings(BaseModel):
+    name: str
     definition: str
-    ingest_ticks: bool
     store_ohlc: bool
-    # Connects to Maintenance service pruning logic
-    raw_tick_retention_period: str = Field(default="1 hour")
+    retention_ohlc: str
+    raw_tick_retention: str
+
+class WhitelistSettings(BaseModel):
+    permanent_assets: Set[str] = Field(default_factory=set)
 
 class ProfileSettings(BaseModel):
     description: str
@@ -24,10 +27,7 @@ class ProfileSettings(BaseModel):
     market_types: List[MarketType]
 
 class UniverseConfig(BaseModel):
-    """
-    The Single Source of Truth for System Capacity and Filtering.
-    Maps to universe.toml v3.0.
-    """
     filters: Dict[str, HardFilterSettings]
     tiers: Dict[str, TierSettings]
+    whitelist: WhitelistSettings
     profiles: Dict[str, ProfileSettings]
