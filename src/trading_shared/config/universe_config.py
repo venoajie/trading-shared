@@ -1,27 +1,33 @@
 # src/trading_shared/config/universe_config.py
 
-
+from typing import List, Dict, Set
 from pydantic import BaseModel, Field
 from trading_engine_core.enums import MarketType
 
+class HardFilterSettings(BaseModel):
+    min_daily_volume: float = Field(default=1_000_000.0)
+    blacklist_assets: Set[str] = Field(default_factory=set)
+    ignore_stable_pairs: bool = Field(default=True)
+    stablecoins: Set[str] = Field(default_factory=set)
 
-class InclusionRules(BaseModel):
-    required_quote_assets: set[str] = Field(default_factory=set)
-    required_exchanges: set[str] = Field(default_factory=set)
+class TierSettings(BaseModel):
+    definition: str
+    ingest_ticks: bool
+    store_ohlc: bool
+    # Connects to Maintenance service pruning logic
+    raw_tick_retention_period: str = Field(default="1 hour")
 
-
-class ConstructionRules(BaseModel):
-    # The dictionary key is now strictly typed to the MarketType Enum.
-    # Pydantic will handle the validation automatically.
-    required_market_types: dict[MarketType, bool] = Field(default_factory=dict)
-
+class ProfileSettings(BaseModel):
+    description: str
+    min_liquidity_tier: str
+    required_exchanges: List[str]
+    market_types: List[MarketType]
 
 class UniverseConfig(BaseModel):
     """
-    A canonical model for defining the instrument trading universe.
-    This provides a single, typed source of truth for all filtering and selection logic.
+    The Single Source of Truth for System Capacity and Filtering.
+    Maps to universe.toml v3.0.
     """
-
-    static_asset_blacklist: set[str] = Field(default_factory=set)
-    inclusion_rules: InclusionRules = Field(default_factory=InclusionRules)
-    construction_rules: ConstructionRules = Field(default_factory=ConstructionRules)
+    filters: Dict[str, HardFilterSettings]
+    tiers: Dict[str, TierSettings]
+    profiles: Dict[str, ProfileSettings]
