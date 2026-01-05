@@ -189,3 +189,35 @@ class MarketDataRepository:
                 decoded[key_str] = val_str
 
         return decoded
+
+    async def set_taker_metrics(self, exchange: str, metrics: TakerMetrics):
+        """
+        Publishes real-time Taker metrics to Redis Hash.
+        Key: market:metrics:taker:{exchange}:{symbol}
+        """
+        key = f"market:metrics:taker:{exchange.lower()}:{metrics.symbol.upper()}"
+
+        # Convert model to dict and values to strings
+        mapping = {k: str(v) for k, v in metrics.model_dump().items()}
+
+        try:
+            pipe = await self._redis.pipeline()
+            await pipe.hset(name=key, mapping=mapping)
+            await pipe.expire(key, 120)  # Short TTL, this is hot data
+            await pipe.execute()
+        except Exception:
+            log.exception(f"Failed to publish taker metrics for {metrics.symbol}")
+
+    async def get_taker_metrics(self, exchange: str, symbol: str) -> Optional[TakerMetrics]:
+        key = f"market:metrics:taker:{exchange.lower()}:{symbol.upper()}"
+        data = await self._redis.hgetall(key)
+
+        if not data:
+            return None
+
+        try:
+            # Decode Redis bytes
+            decoded = {k.decode("utf-8"): v.decode("utf-8") for k, v in data.items()}
+            return TakerMetrics.model_validate(decoded)
+        except Exception:
+            return None
