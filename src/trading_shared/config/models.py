@@ -2,6 +2,7 @@
 
 # --- Built Ins  ---
 from urllib.parse import quote_plus
+from typing import List
 
 # --- Installed  ---
 from pydantic import BaseModel, Field, SecretStr, computed_field
@@ -59,6 +60,7 @@ class ExchangeSettings(BaseModel):
     # WebSocket and REST URLs
     ws_url: str | None = None
     rest_url: str = Field(default="https://www.deribit.com")
+    currencies: List[str] = Field(default_factory=list, description="Currencies to sync for this exchange.")
 
 
 class TelegramSettings(BaseModel):

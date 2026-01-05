@@ -40,24 +40,28 @@ class UniverseConfig(BaseModel):
 # --- LOADER ---
 
 def load_universe_config() -> UniverseConfig:
+    # 1. Check Env Var
     config_path_str = os.getenv("UNIVERSE_CONFIG_PATH")
+    
+    # 2. Check hardcoded container default
     if not config_path_str:
         config_path_str = "/app/config/universe.toml"
     
-    config_path = Path(config_path_str)
+    path = Path(config_path_str)
     
-    # Fallback for local testing
-    if not config_path.is_file():
-        local_fallback = Path("config/universe.toml")
-        if local_fallback.is_file():
-            config_path = local_fallback
+    # 3. Last Resort: Local relative path for dev
+    if not path.is_file():
+        path = Path("config/universe.toml")
 
-    if not config_path.is_file():
-        raise FileNotFoundError(f"Universe config not found at {config_path}")
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Universe config NOT FOUND. Tried: {config_path_str} and {path.absolute()}"
+        )
 
     try:
-        with open(config_path, "rb") as f:
+        with open(path, "rb") as f:
             config_data = tomli.load(f)
         return UniverseConfig.model_validate(config_data)
     except Exception as e:
-        raise RuntimeError(f"Failed to load universe config: {e}")
+        # Wrap Pydantic validation errors with better context
+        raise RuntimeError(f"UniverseConfig validation failed: {e}")
