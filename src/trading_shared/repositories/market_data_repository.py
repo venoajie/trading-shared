@@ -9,7 +9,7 @@ import orjson
 from loguru import logger as log
 
 # --- Shared Library Imports ---
-from trading_engine_core.models import StreamMessage
+from trading_engine_core.models import StreamMessage, TakerMetrics
 
 from trading_shared.clients.redis_client import CustomRedisClient
 
@@ -208,7 +208,7 @@ class MarketDataRepository:
         except Exception:
             log.exception(f"Failed to publish taker metrics for {metrics.symbol}")
 
-    async def get_taker_metrics(self, exchange: str, symbol: str) -> Optional[TakerMetrics]:
+    async def get_taker_metrics(self, exchange: str, symbol: str) -> TakerMetrics | None:
         key = f"market:metrics:taker:{exchange.lower()}:{symbol.upper()}"
         data = await self._redis.hgetall(key)
 
