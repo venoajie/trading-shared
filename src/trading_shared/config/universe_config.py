@@ -15,32 +15,46 @@ class FilterSettings(BaseModel):
     required_quote_assets: set[str]
 
 
-class StorageTierSettings(BaseModel):
-    storage_mode: str
-    buffer_window_minutes: int | None = None
+class UniverseDefinition(BaseModel):
+    """
+    Defines the blueprint for a single universe.
+    Consumed by the Janitor's UniverseMaterializer.
+    """
+
+    type: str  # e.g., "structural_pair" or "filtered_instruments"
+    materialized_as: str  # e.g., "TABLE:tradable_assets" or "VIEW:v_tradable_spots"
     description: str
 
+    # Fields for 'structural_pair' type
+    required_market_types: list[str] | None = None
+    primary_instrument: str | None = None
 
-class StrategyProfileSettings(BaseModel):
-    description: str
-    required_storage_tier: str
+    # Fields for 'filtered_instruments' type
+    filter_market_type: str | None = None
+
+
+class StrategyMappingSettings(BaseModel):
+    consumes_universe: str
 
 
 class UniverseConfig(BaseModel):
     filters: FilterSettings
-    storage_tiers: dict[str, StorageTierSettings]
-    strategy_profiles: dict[str, StrategyProfileSettings]
+    universe_definitions: dict[str, UniverseDefinition]
+    strategy_mapping: dict[str, StrategyMappingSettings]
 
 
 # --- LOADER ---
-
-
 def load_universe_config() -> UniverseConfig:
-    # (Loader function remains the same, it's robust)
+    """
+    Loads and validates the universe.toml configuration file.
+    """
     config_path_str = os.getenv("UNIVERSE_CONFIG_PATH", "/app/config/universe.toml")
     path = Path(config_path_str)
+
     if not path.is_file():
-        path = Path("config/universe.toml")  # Local dev fallback
+        # Fallback for local development
+        path = Path("config/universe.toml")
+
     if not path.is_file():
         raise FileNotFoundError(f"Universe config NOT FOUND. Tried: {config_path_str} and {path.absolute()}")
 
