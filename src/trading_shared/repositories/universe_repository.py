@@ -1,5 +1,5 @@
 # src/trading_shared/repositories/universe_repository.py
-from typing import Dict, Any, List
+from typing import Any
 
 from loguru import logger as log
 
@@ -32,8 +32,7 @@ class UniverseRepository:
             log.error(f"Failed to fetch persistent instruments for {exchange}: {e}")
             return []
 
-
-    async def get_all_persistent_instruments(self) -> List[Dict[str, Any]]:
+    async def get_all_persistent_instruments(self) -> list[dict[str, Any]]:
         """
         Queries the 'v_persistent_instruments' view to get ALL assets
         designated for persistent storage, across all exchanges.
