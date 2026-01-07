@@ -31,3 +31,19 @@ class UniverseRepository:
         except Exception as e:
             log.error(f"Failed to fetch persistent instruments for {exchange}: {e}")
             return []
+
+
+    async def get_all_persistent_instruments(self) -> List[Dict[str, Any]]:
+        """
+        Queries the 'v_persistent_instruments' view to get ALL assets
+        designated for persistent storage, across all exchanges.
+        """
+        query = "SELECT instrument_name, exchange FROM v_persistent_instruments"
+        try:
+            records = await self.db.fetch(query)
+            # Convert to the dict structure the Analyzer expects
+            return [dict(r) for r in records]
+        except Exception as e:
+            # It's critical to log this, as it's a sign the Janitor has failed
+            log.error(f"Failed to fetch all persistent instruments from view. Has Janitor run successfully? Error: {e}")
+            return []
