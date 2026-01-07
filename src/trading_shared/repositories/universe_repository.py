@@ -1,5 +1,5 @@
 # src/trading_shared/repositories/universe_repository.py
-
+from typing import Dict, Any, List
 
 from loguru import logger as log
 
