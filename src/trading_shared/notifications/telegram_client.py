@@ -1,6 +1,7 @@
 # src/trading_shared/notifications/telegram_client.py
 
 import asyncio
+import time
 from typing import Self
 
 import aiohttp
@@ -34,6 +35,9 @@ class TelegramClient:
         self._session = session
         self._token = token
         self._chat_id = chat_id
+        # --- Centralized Rate Limiter ---
+        self._last_send_time = 0.0
+        self._rate_limit_delay_s = 1.1  # Telegram allows ~1 msg/sec, add buffer
         self.is_enabled = bool(token and chat_id)
         if not self.is_enabled:
             log.warning("TelegramClient is disabled: token or chat_id is missing.")
@@ -90,18 +94,31 @@ class TelegramClient:
         retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError)),
         reraise=True,
     )
+
+    # --- Rate Limiting Method ---
+    async def _enforce_rate_limit(self):
+        """Ensures messages are not sent faster than the defined delay."""
+        now = time.monotonic()
+        elapsed = now - self._last_send_time
+        if elapsed < self._rate_limit_delay_s:
+            await asyncio.sleep(self._rate_limit_delay_s - elapsed)
+        self._last_send_time = time.monotonic()
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=5),
+        retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError)),
+        reraise=True,
+    )
     async def send_message(self, text: str, parse_mode: str = "MarkdownV2"):
-        """
-        Sends a message to the configured Telegram chat with retry logic.
-        Raises TelegramDeliveryError if all retries fail.
-        """
         if not self.is_enabled:
             log.trace("Skipping Telegram send because client is disabled.")
             return
 
+        # --- APPLY RATE LIMIT ---
+        await self._enforce_rate_limit()
+
         api_url = f"https://api.telegram.org/bot{self._token}/sendMessage"
-        # Telegram MarkdownV2 requires escaping of special characters.
-        # This is a transport-level concern.
         escaped_text = text.replace("-", "\\-").replace(".", "\\.").replace("!", "\\!").replace("(", "\\(").replace(")", "\\)")
 
         payload = {
@@ -111,12 +128,11 @@ class TelegramClient:
         }
         try:
             async with self._session.post(api_url, json=payload, timeout=10) as response:
-                response.raise_for_status()  # Raises for 4xx/5xx responses
+                response.raise_for_status()
                 log.debug("Successfully sent message to Telegram.")
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             log.warning(f"Telegram send failed, will retry. Error: {e}")
-            raise  # Re-raise to trigger tenacity's retry mechanism
+            raise
         except Exception as e:
             log.error(f"Unhandled exception during Telegram send: {e}")
-            # Wrap in our custom exception to signal terminal failure
             raise TelegramDeliveryError(f"Failed to send message after retries: {e}") from e
