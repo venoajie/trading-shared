@@ -2,16 +2,10 @@
 
 import asyncio
 import time
-from typing import Self
+from typing import Self, Optional
 
 import aiohttp
 from loguru import logger as log
-from tenacity import (
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
 
 
 class TelegramDeliveryError(Exception):
@@ -22,8 +16,8 @@ class TelegramDeliveryError(Exception):
 
 class TelegramClient:
     """
-    A pure, resilient transport-layer client for the Telegram Bot API.
-    It is responsible for sending pre-formatted messages with retry logic.
+    A robust transport-layer client for the Telegram Bot API.
+    Handles rate limits (429) compliantly by respecting 'Retry-After'.
     """
 
     def __init__(
@@ -35,10 +29,11 @@ class TelegramClient:
         self._session = session
         self._token = token
         self._chat_id = chat_id
-        # --- Centralized Rate Limiter ---
         self._last_send_time = 0.0
-        self._rate_limit_delay_s = 1.1  # Telegram allows ~1 msg/sec, add buffer
+        # Client-side safety buffer (prevents bursting)
+        self._min_interval_s = 1.0
         self.is_enabled = bool(token and chat_id)
+
         if not self.is_enabled:
             log.warning("TelegramClient is disabled: token or chat_id is missing.")
 
@@ -49,17 +44,12 @@ class TelegramClient:
         token: str | None,
         chat_id: str | None,
     ) -> Self:
-        """Asynchronously creates and validates a TelegramClient instance."""
         client = cls(session, token, chat_id)
         if client.is_enabled:
             await client._verify_token()
         return client
 
     async def _verify_token(self):
-        """
-        Performs a 'getMe' API call to verify the bot token.
-        Refactored to allow degraded startup on network timeout.
-        """
         log.info("Verifying Telegram Bot Token...")
         api_url = f"https://api.telegram.org/bot{self._token}/getMe"
         try:
@@ -70,69 +60,79 @@ class TelegramClient:
                     log.success(f"Telegram token valid. Connected to bot: @{username}")
                     return
 
-                # Non-retryable auth errors still cause a crash as they indicate invalid secrets
                 if response.status in [401, 404]:
-                    raise ConnectionRefusedError("Telegram Bot Token is invalid or revoked. Check secrets.")
+                    raise ConnectionRefusedError("Telegram Bot Token is invalid or revoked.")
+
                 response.raise_for_status()
 
         except (aiohttp.ClientConnectorError, asyncio.TimeoutError) as e:
-            # Degraded mode allowance
-            log.critical(
-                f"TELEGRAM EGRESS BLOCKED: Timeout/Connection error during verification. "
-                f"The service will start in DEGRADED mode. Notifications will fail until egress is restored. "
-                f"Error: {e}"
-            )
-            # We do not raise the error here; we allow the service to continue.
+            log.critical(f"TELEGRAM EGRESS BLOCKED: {e}. Starting in DEGRADED mode.")
             return
         except Exception as e:
-            log.error(f"Unexpected error during Telegram token verification: {e}")
+            log.error(f"Unexpected error during verification: {e}")
             raise
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=5),
-        retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError)),
-        reraise=True,
-    )
-
-    # --- Rate Limiting Method ---
-    async def _enforce_rate_limit(self):
-        """Ensures messages are not sent faster than the defined delay."""
+    async def _enforce_client_rate_limit(self):
+        """Prevents rapid-fire requests from leaving the client."""
         now = time.monotonic()
         elapsed = now - self._last_send_time
-        if elapsed < self._rate_limit_delay_s:
-            await asyncio.sleep(self._rate_limit_delay_s - elapsed)
+        if elapsed < self._min_interval_s:
+            await asyncio.sleep(self._min_interval_s - elapsed)
         self._last_send_time = time.monotonic()
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=5),
-        retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError)),
-        reraise=True,
-    )
     async def send_message(self, text: str, parse_mode: str = "MarkdownV2"):
         if not self.is_enabled:
-            log.trace("Skipping Telegram send because client is disabled.")
             return
 
-        # --- APPLY RATE LIMIT ---
-        await self._enforce_rate_limit()
+        await self._enforce_client_rate_limit()
 
         api_url = f"https://api.telegram.org/bot{self._token}/sendMessage"
-        escaped_text = text.replace("-", "\\-").replace(".", "\\.").replace("!", "\\!").replace("(", "\\(").replace(")", "\\)")
+        # Basic escaping for MarkdownV2 to prevent 400 Bad Request
+        escaped_text = text.replace("-", "\\-").replace(".", "\\.").replace("!", "\\!")
+        escaped_text = escaped_text.replace("(", "\\(").replace(")", "\\)").replace("=", "\\=")
 
         payload = {
             "chat_id": self._chat_id,
             "text": f"```\n{escaped_text}\n```",
             "parse_mode": parse_mode,
         }
-        try:
-            async with self._session.post(api_url, json=payload, timeout=10) as response:
-                response.raise_for_status()
-                log.debug("Successfully sent message to Telegram.")
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-            log.warning(f"Telegram send failed, will retry. Error: {e}")
-            raise
-        except Exception as e:
-            log.error(f"Unhandled exception during Telegram send: {e}")
-            raise TelegramDeliveryError(f"Failed to send message after retries: {e}") from e
+
+        # --- Manual Retry Loop for 429 Handling ---
+        max_retries = 3
+        for attempt in range(1, max_retries + 1):
+            try:
+                async with self._session.post(api_url, json=payload, timeout=10) as response:
+                    # CASE: Rate Limit Hit
+                    if response.status == 429:
+                        retry_after = 5  # Default fallback
+                        try:
+                            # Telegram sends retry_after in the JSON parameters
+                            data = await response.json()
+                            retry_after = data.get("parameters", {}).get("retry_after", retry_after)
+                        except Exception:
+                            # Fallback to header if JSON parsing fails
+                            val = response.headers.get("Retry-After")
+                            if val:
+                                retry_after = int(val)
+
+                        log.warning(f"Telegram 429: Too Many Requests. Sleeping {retry_after}s (Attempt {attempt})")
+                        await asyncio.sleep(retry_after + 0.5)  # Add small buffer
+                        continue  # Retry the loop
+
+                    # CASE: Success
+                    if response.status == 200:
+                        log.debug("Telegram message sent successfully.")
+                        return
+
+                    # CASE: Other Error
+                    response.raise_for_status()
+
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                log.warning(f"Network error sending Telegram message: {e}.")
+                if attempt < max_retries:
+                    sleep_time = 2**attempt
+                    log.info(f"Retrying in {sleep_time}s...")
+                    await asyncio.sleep(sleep_time)
+                else:
+                    log.error("Max retries reached. Message dropped.")
+                    raise TelegramDeliveryError(f"Failed to send after {max_retries} attempts.") from e
