@@ -48,23 +48,51 @@ class BinanceWsClient(AbstractWsClient):
         self._ws: websockets.WebSocketClientProtocol | None = None
         self.shard_num_for_log = self.shard_id + 1
 
+        # Maps Raw (Exchange) Symbol -> Canonical (System) Symbol
+        self._symbol_map: dict[str, str] = {}
+
     async def _get_channels_from_universe(self, universe: list[dict[str, any]]) -> set[str]:
         """
-        Parses the rich universe object to extract symbols
-        for this client's specific shard.
+        Parses the rich universe object to extract symbols for this client's specific shard.
+        Populates self._symbol_map to ensure Ticker Cache uses Canonical names.
         """
         my_targets = set()
+        temp_map = {}
+
         for asset_pair in universe:
             # Check both spot and perp exchanges to match this client's market definition
             if asset_pair.get("exchange_spot") == self.exchange_name:
                 if symbol := asset_pair.get("spot_symbol"):
                     my_targets.add(symbol)
+                    # Binance Raw often strips hyphens. We assume standard convention or lookup.
+                    # Ideally, Janitor provides the 'raw_symbol' in the ledger.
+                    # Assuming standard Binance format (remove '-') for now.
+                    raw_symbol = symbol.replace("-", "").upper()
+                    temp_map[raw_symbol] = symbol
+
             if asset_pair.get("exchange_perp") == self.exchange_name:
                 if symbol := asset_pair.get("perp_symbol"):
                     my_targets.add(symbol)
+                    raw_symbol = symbol.replace("-", "").upper()
+                    temp_map[raw_symbol] = symbol
+
+        # Update the instance map
+        self._symbol_map.update(temp_map)
 
         sharded_targets = {symbol for i, symbol in enumerate(sorted(my_targets)) if i % self.total_shards == self.shard_id}
-        return {f"{symbol.lower()}@trade" for symbol in sharded_targets}
+
+        # Convert canonical targets back to raw for channel subscription
+        channels = set()
+        for canonical in sharded_targets:
+            # Reverse lookup or re-derive raw
+            raw = canonical.replace("-", "").lower()
+            channels.add(f"{raw}@trade")
+            channels.add(f"{raw}@ticker")  # Ensure we subscribe to ticker if needed, or rely on trade stream data if it contains price
+
+        # Optimization: If we only rely on @trade for trades, we still need @ticker for the 24h volume?
+        # The prompt implies we need 24h volume. @trade does not provide 24h volume.
+        # We MUST subscribe to @ticker or @miniTicker to populate the cache used by DataFacade.
+        return channels
 
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
         """
@@ -88,13 +116,27 @@ class BinanceWsClient(AbstractWsClient):
                     try:
                         data = orjson.loads(message)
                         payload = data.get("data")
-                        if payload and data.get("stream"):
-                            yield StreamMessage(
-                                exchange=self.exchange_name,
-                                channel=data["stream"],
-                                timestamp=payload.get("T"),
-                                data=payload,
-                            )
+                        stream = data.get("stream")
+
+                        if payload and stream:
+                            # 1. Routing: Trade Stream
+                            if "trade" in stream:
+                                yield StreamMessage(
+                                    exchange=self.exchange_name,
+                                    channel=stream,
+                                    timestamp=payload.get("T"),
+                                    data=payload,
+                                )
+
+                            # 2. Routing: Ticker Stream (for 24h Volume Cache)
+                            # Binance payload 's' is the RAW symbol (e.g. BTCUSDT)
+                            if "ticker" in stream:
+                                raw_symbol = payload.get("s")
+                                if raw_symbol:
+                                    # Normalize to Canonical before Caching
+                                    canonical_symbol = self._symbol_map.get(raw_symbol, raw_symbol)
+                                    await self.market_data_repo.cache_ticker(canonical_symbol, payload)
+
                     except (orjson.JSONDecodeError, KeyError, TypeError):
                         log.warning("Failed to decode or parse Binance message.")
 

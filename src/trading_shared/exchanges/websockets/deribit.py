@@ -53,7 +53,6 @@ class DeribitWsClient(AbstractWsClient):
         """
         my_targets = set()
         for asset_pair in universe:
-            # ... existing symbol extraction logic ...
             if asset_pair.get("exchange_spot") == self.exchange_name:
                 if symbol := asset_pair.get("spot_symbol"):
                     my_targets.add(symbol)
@@ -66,8 +65,8 @@ class DeribitWsClient(AbstractWsClient):
         channels = set()
         for symbol in sharded_targets:
             s_lower = symbol.lower()
-            channels.add(f"{s_lower}@trade")
-            channels.add(f"{s_lower}@ticker")
+            channels.add(f"trades.{s_lower}.100ms")  # Deribit specific trade channel
+            channels.add(f"ticker.{s_lower}.100ms")  # Deribit specific ticker channel
         return channels
 
     async def _send_rpc(self, method: str, params: dict):
@@ -101,8 +100,7 @@ class DeribitWsClient(AbstractWsClient):
 
     async def _handle_subscriptions(self):
         """
-        [MODIFIED] This method now uses the newly implemented contract methods for clarity,
-        though it could also call _send_rpc directly. This is a stylistic choice for consistency.
+        Subscribes to channels after authentication.
         """
         if self.subscription_scope == "private":
             auth_params = {
@@ -130,28 +128,37 @@ class DeribitWsClient(AbstractWsClient):
                 async for message in ws:
                     try:
                         data = orjson.loads(message)
-                        stream_name = data.get("stream")
-                        payload = data.get("data")
 
-                        if payload and stream_name:
+                        # Deribit Notifications come in 'params' -> 'data'
+                        params = data.get("params", {})
+                        channel = params.get("channel")
+                        payload = params.get("data")
+
+                        if payload and channel:
                             # ROUTING LOGIC
-                            if "trade" in stream_name:
-                                yield StreamMessage(
-                                    exchange=self.exchange_name,
-                                    channel=stream_name,
-                                    timestamp=payload.get("T"),
-                                    data=payload,
-                                )
-                            elif "ticker" in stream_name:
+                            if "trades" in channel:
+                                # Deribit 'trades' payload is a LIST of trades
+                                for trade in payload:
+                                    yield StreamMessage(
+                                        exchange=self.exchange_name,
+                                        channel=channel,
+                                        timestamp=trade.get("timestamp"),
+                                        data=trade,
+                                    )
+
+                            elif "ticker" in channel:
                                 # DIRECT CACHE UPDATE (Ticker)
-                                # Binance Ticker format: 's': symbol, 'v': volume, 'c': last price
-                                symbol = payload.get("s")
+                                # Deribit uses 'instrument_name', NOT 's'
+                                symbol = payload.get("instrument_name")
                                 if symbol:
-                                    # We cache the raw payload; DataFacade handles parsing
+                                    # Cache raw payload
                                     await self.market_data_repo.cache_ticker(symbol, payload)
 
-                    except (orjson.JSONDecodeError, KeyError, TypeError):
-                        log.warning(f"[{self.exchange_name}] Could not parse message.")
+                    except (orjson.JSONDecodeError, KeyError, TypeError) as e:
+                        # Reduce noise, but log on actual parse errors
+                        if "heartbeat" not in str(message):
+                            log.warning(f"[{self.exchange_name}] Parsing error: {e}")
+
         finally:
             self._ws = None
             log.warning(f"[{self.exchange_name}][{self.subscription_scope}] WebSocket connection closed.")
@@ -165,7 +172,7 @@ class DeribitWsClient(AbstractWsClient):
             pass  # Normal shutdown
 
     async def process_messages(self):
-        """[REFACTORED] The main supervisor loop that manages the connection lifecycle."""
+        """The main supervisor loop that manages the connection lifecycle."""
         self._is_running.set()
         reconnect_attempts = 0
         subscription_task = None
@@ -173,7 +180,6 @@ class DeribitWsClient(AbstractWsClient):
         if self.subscription_scope == "public":
             subscription_task = asyncio.create_task(self._maintain_subscriptions())
         else:
-            # For private scope, we don't need dynamic subs, just set the event once to connect.
             self._reconnect_event.set()
 
         while self._is_running.is_set():
