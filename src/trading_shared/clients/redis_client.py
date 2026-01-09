@@ -532,6 +532,18 @@ class CustomRedisClient:
         else:
             raise ValueError("hset requires either a key/value pair or a mapping.")
 
+    async def incr(self, key: str) -> int:
+        """
+        Increments the number stored at key by one.
+        If the key does not exist, it is set to 0 before performing the operation.
+        Returns the new value.
+        """
+
+        async def command(conn: aioredis.Redis):
+            return await conn.incr(key)
+
+        return await self.execute_resiliently(command, f"INCR {key}")
+
     async def expire(
         self,
         name: str,
