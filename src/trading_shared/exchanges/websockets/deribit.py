@@ -4,7 +4,6 @@
 import asyncio
 import time
 from collections.abc import AsyncGenerator
-from typing import Any
 
 # --- Installed ---
 import orjson
@@ -47,7 +46,6 @@ class DeribitWsClient(AbstractWsClient):
         if self.subscription_scope == "private" and (not settings.client_id or not settings.client_secret):
             raise ValueError("Deribit private scope requires client_id and client_secret.")
 
-
     async def _get_channels_from_universe(self, universe: list[dict[str, any]]) -> set[str]:
         """
         Parses the rich universe object to extract symbols for this client's shard.
@@ -64,14 +62,14 @@ class DeribitWsClient(AbstractWsClient):
                     my_targets.add(symbol)
 
         sharded_targets = {symbol for i, symbol in enumerate(sorted(my_targets)) if i % self.total_shards == self.shard_id}
-        
+
         channels = set()
         for symbol in sharded_targets:
             s_lower = symbol.lower()
             channels.add(f"{s_lower}@trade")
-            channels.add(f"{s_lower}@ticker") 
+            channels.add(f"{s_lower}@ticker")
         return channels
-    
+
     async def _send_rpc(self, method: str, params: dict):
         """Safely sends a JSON-RPC formatted request to the WebSocket."""
         if not self._ws:
@@ -134,7 +132,7 @@ class DeribitWsClient(AbstractWsClient):
                         data = orjson.loads(message)
                         stream_name = data.get("stream")
                         payload = data.get("data")
-                        
+
                         if payload and stream_name:
                             # ROUTING LOGIC
                             if "trade" in stream_name:
@@ -151,7 +149,7 @@ class DeribitWsClient(AbstractWsClient):
                                 if symbol:
                                     # We cache the raw payload; DataFacade handles parsing
                                     await self.market_data_repo.cache_ticker(symbol, payload)
-                                    
+
                     except (orjson.JSONDecodeError, KeyError, TypeError):
                         log.warning(f"[{self.exchange_name}] Could not parse message.")
         finally:
