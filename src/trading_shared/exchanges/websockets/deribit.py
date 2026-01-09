@@ -47,15 +47,31 @@ class DeribitWsClient(AbstractWsClient):
         if self.subscription_scope == "private" and (not settings.client_id or not settings.client_secret):
             raise ValueError("Deribit private scope requires client_id and client_secret.")
 
-    async def _get_channels_from_universe(self, universe: list[dict[str, Any]]) -> set[str]:
-        """Consumes the clean universe object and filters for Deribit perpetuals."""
-        my_targets: set[str] = set()
-        for instrument_data in universe:
-            if instrument_data.get("exchange_perp") == self.exchange_name:
-                if perp_symbol := instrument_data.get("perp_symbol"):
-                    my_targets.add(f"trades.{perp_symbol}.raw")
-        return my_targets
 
+    async def _get_channels_from_universe(self, universe: list[dict[str, any]]) -> set[str]:
+        """
+        Parses the rich universe object to extract symbols for this client's shard.
+        Adds BOTH trade and ticker channels.
+        """
+        my_targets = set()
+        for asset_pair in universe:
+            # ... existing symbol extraction logic ...
+            if asset_pair.get("exchange_spot") == self.exchange_name:
+                if symbol := asset_pair.get("spot_symbol"):
+                    my_targets.add(symbol)
+            if asset_pair.get("exchange_perp") == self.exchange_name:
+                if symbol := asset_pair.get("perp_symbol"):
+                    my_targets.add(symbol)
+
+        sharded_targets = {symbol for i, symbol in enumerate(sorted(my_targets)) if i % self.total_shards == self.shard_id}
+        
+        channels = set()
+        for symbol in sharded_targets:
+            s_lower = symbol.lower()
+            channels.add(f"{s_lower}@trade")
+            channels.add(f"{s_lower}@ticker") 
+        return channels
+    
     async def _send_rpc(self, method: str, params: dict):
         """Safely sends a JSON-RPC formatted request to the WebSocket."""
         if not self._ws:
@@ -116,16 +132,26 @@ class DeribitWsClient(AbstractWsClient):
                 async for message in ws:
                     try:
                         data = orjson.loads(message)
-                        params = data.get("params")
-                        if isinstance(params, dict) and "channel" in params and "data" in params:
-                            trade_list = params["data"] if isinstance(params["data"], list) else [params["data"]]
-                            for trade in trade_list:
+                        stream_name = data.get("stream")
+                        payload = data.get("data")
+                        
+                        if payload and stream_name:
+                            # ROUTING LOGIC
+                            if "trade" in stream_name:
                                 yield StreamMessage(
                                     exchange=self.exchange_name,
-                                    channel=params["channel"],
-                                    timestamp=trade.get("timestamp"),
-                                    data=trade,
+                                    channel=stream_name,
+                                    timestamp=payload.get("T"),
+                                    data=payload,
                                 )
+                            elif "ticker" in stream_name:
+                                # DIRECT CACHE UPDATE (Ticker)
+                                # Binance Ticker format: 's': symbol, 'v': volume, 'c': last price
+                                symbol = payload.get("s")
+                                if symbol:
+                                    # We cache the raw payload; DataFacade handles parsing
+                                    await self.market_data_repo.cache_ticker(symbol, payload)
+                                    
                     except (orjson.JSONDecodeError, KeyError, TypeError):
                         log.warning(f"[{self.exchange_name}] Could not parse message.")
         finally:
