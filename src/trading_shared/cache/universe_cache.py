@@ -1,11 +1,12 @@
 # src/trading_shared/cache/universe_cache.py
 
 import asyncio
-import orjson  # Optimization: Replaces json
-from typing import List, Dict, Any, Optional
+from typing import Any
 
+import orjson  # Optimization: Replaces json
 from loguru import logger as log
 from trading_engine_core.models import StorageMode
+
 from trading_shared.clients.redis_client import CustomRedisClient
 
 
@@ -20,9 +21,9 @@ class UniverseCache:
         self._universe_key = universe_key
 
         # Maps instrument_name -> StorageMode
-        self._cache: Dict[str, StorageMode] = {}
+        self._cache: dict[str, StorageMode] = {}
         # Stores the full list of dictionaries for the Analyzer loop
-        self._raw_ledger: List[Dict[str, Any]] = []
+        self._raw_ledger: list[dict[str, Any]] = []
 
         self._lock = asyncio.Lock()
 
@@ -35,7 +36,7 @@ class UniverseCache:
         async with self._lock:
             return self._cache.get(instrument_name, StorageMode.PERSISTENT)
 
-    def get_all_instruments(self) -> List[Dict[str, Any]]:
+    def get_all_instruments(self) -> list[dict[str, Any]]:
         """
         Returns the full raw ledger.
         REQUIRED by Analyzer to iterate over the Broad universe.

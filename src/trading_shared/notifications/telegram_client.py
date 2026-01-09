@@ -2,7 +2,7 @@
 
 import asyncio
 import time
-from typing import Self, Optional
+from typing import Self
 
 import aiohttp
 from loguru import logger as log

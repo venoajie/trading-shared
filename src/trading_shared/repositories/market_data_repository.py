@@ -1,11 +1,12 @@
 # src/trading_shared/repositories/market_data_repository.py
 
 from collections import deque
-from typing import Any, List, Optional
+from typing import Any
+
 import orjson
 from loguru import logger as log
-
 from trading_engine_core.models import StreamMessage, TakerMetrics
+
 from trading_shared.clients.redis_client import CustomRedisClient
 
 
@@ -21,7 +22,7 @@ class MarketDataRepository:
     async def add_messages_to_stream(
         self,
         stream_name: str,
-        messages: List[StreamMessage] | deque[StreamMessage],
+        messages: list[StreamMessage] | deque[StreamMessage],
         maxlen: int = 10000,
     ):
         if not messages:
@@ -36,7 +37,7 @@ class MarketDataRepository:
         redis_key = f"ticker:{symbol}"
         await self._redis.hset(redis_key, "payload", orjson.dumps(data))
 
-    async def get_ticker_data(self, instrument_name: str) -> Optional[dict[str, Any]]:
+    async def get_ticker_data(self, instrument_name: str) -> dict[str, Any] | None:
         key = f"ticker:{instrument_name}"
         try:
             payload = await self._redis.hget(key, "payload")
@@ -75,7 +76,7 @@ class MarketDataRepository:
         except Exception:
             log.exception(f"Failed to update live candle for key '{key}'")
 
-    async def get_realtime_candle(self, exchange: str, instrument_name: str) -> Optional[dict[str, Any]]:
+    async def get_realtime_candle(self, exchange: str, instrument_name: str) -> dict[str, Any] | None:
         key = f"market:cache:{exchange.lower()}:ohlc:live:{instrument_name.upper()}"
         data = await self._redis.hgetall(key)
 
@@ -109,7 +110,7 @@ class MarketDataRepository:
         except Exception:
             log.exception(f"Failed to publish metrics for {instrument_name}")
 
-    async def get_market_metrics(self, exchange: str, instrument_name: str) -> Optional[dict[str, Any]]:
+    async def get_market_metrics(self, exchange: str, instrument_name: str) -> dict[str, Any] | None:
         key = f"market:metrics:{exchange.lower()}:rvol:{instrument_name.upper()}"
         data = await self._redis.hgetall(key)
         if not data:
@@ -136,7 +137,7 @@ class MarketDataRepository:
         except Exception:
             log.exception(f"Failed to publish taker metrics for {metrics.symbol}")
 
-    async def get_taker_metrics(self, exchange: str, symbol: str) -> Optional[TakerMetrics]:
+    async def get_taker_metrics(self, exchange: str, symbol: str) -> TakerMetrics | None:
         key = f"market:metrics:taker:{exchange.lower()}:{symbol.upper()}"
         data = await self._redis.hgetall(key)
         if not data:
