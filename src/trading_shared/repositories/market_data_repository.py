@@ -1,4 +1,3 @@
-
 # src/trading_shared/repositories/market_data_repository.py
 
 from collections import deque
@@ -8,6 +7,7 @@ from loguru import logger as log
 
 from trading_engine_core.models import StreamMessage, TakerMetrics
 from trading_shared.clients.redis_client import CustomRedisClient
+
 
 class MarketDataRepository:
     """
@@ -26,7 +26,7 @@ class MarketDataRepository:
     ):
         if not messages:
             return
-        
+
         # Optimize: Batch dump
         message_dicts = [msg.model_dump(exclude_none=True) for msg in messages]
         await self._redis.xadd_bulk(stream_name, message_dicts, maxlen=maxlen)
@@ -50,11 +50,11 @@ class MarketDataRepository:
     async def update_realtime_candle(self, exchange: str, instrument_name: str, candle_data: dict):
         """
         Updates the 'Live' in-flight candle.
-        CRITICAL: TTL is set to 5 seconds. If ingestion stops, this key MUST vanish 
+        CRITICAL: TTL is set to 5 seconds. If ingestion stops, this key MUST vanish
         so downstream services (Analyzer) stop producing signals on stale data.
         """
         key = f"market:cache:{exchange.lower()}:ohlc:live:{instrument_name.upper()}"
-        
+
         mapping = {
             "tick": str(candle_data["tick"]),
             "open": str(candle_data["open"]),
@@ -70,7 +70,7 @@ class MarketDataRepository:
         try:
             pipe = await self._redis.pipeline()
             await pipe.hset(name=key, mapping=mapping)
-            await pipe.expire(key, 5) # <--- ZOMBIE DATA KILL SWITCH
+            await pipe.expire(key, 5)  # <--- ZOMBIE DATA KILL SWITCH
             await pipe.execute()
         except Exception:
             log.exception(f"Failed to update live candle for key '{key}'")
@@ -114,7 +114,7 @@ class MarketDataRepository:
         data = await self._redis.hgetall(key)
         if not data:
             return None
-        
+
         decoded = {}
         for k, v in data.items():
             key_str = k.decode("utf-8")
