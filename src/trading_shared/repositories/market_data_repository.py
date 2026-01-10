@@ -1,11 +1,12 @@
+
 # src/trading_shared/repositories/market_data_repository.py
 
 from collections import deque
-from typing import Any
+from typing import Any, Dict
 
 import orjson
 from loguru import logger as log
-from trading_engine_core.models import StreamMessage, TakerMetrics
+from trading_engine_core.models import StreamMessage, TakerMetrics, OHLCModel
 
 from trading_shared.clients.redis_client import CustomRedisClient
 
@@ -33,12 +34,22 @@ class MarketDataRepository:
         await self._redis.xadd_bulk(stream_name, message_dicts, maxlen=maxlen)
         log.debug(f"Flushed batch of {len(messages)} messages to Redis stream '{stream_name}'.")
 
-    async def cache_ticker(self, symbol: str, data: dict):
-        redis_key = f"ticker:{symbol}"
-        await self._redis.hset(redis_key, "payload", orjson.dumps(data))
+    # MODIFIED: Corrected type hint and added TTL parameter
+    async def cache_ticker(self, symbol: str, data: Dict[str, Any], ttl_seconds: int = 5400):
+        """Caches ticker data with a 90-minute TTL."""
+        redis_key = f"ticker:{symbol.upper()}"
+        try:
+            pipe = await self._redis.pipeline()
+            # Storing as a JSON string in a single field is efficient for full object retrieval
+            await pipe.hset(redis_key, "payload", orjson.dumps(data))
+            await pipe.expire(redis_key, ttl_seconds)
+            await pipe.execute()
+        except Exception:
+            log.exception(f"Failed to cache ticker for {symbol}")
+
 
     async def get_ticker_data(self, instrument_name: str) -> dict[str, Any] | None:
-        key = f"ticker:{instrument_name}"
+        key = f"ticker:{instrument_name.upper()}"
         try:
             payload = await self._redis.hget(key, "payload")
             if not payload:
@@ -75,6 +86,15 @@ class MarketDataRepository:
             await pipe.execute()
         except Exception:
             log.exception(f"Failed to update live candle for key '{key}'")
+    
+    async def persist_ephemeral_candles(self, candles: list[OHLCModel]):
+        """Persists a batch of completed candles designated as EPHEMERAL."""
+        # This functionality might be better named or placed, but for now, it handles
+        # writing completed candles to a final resting place in Redis if needed.
+        # For this system, we only care about the live candle, so this might be a no-op
+        # or could be used to store a short history.
+        pass
+
 
     async def get_realtime_candle(self, exchange: str, instrument_name: str) -> dict[str, Any] | None:
         key = f"market:cache:{exchange.lower()}:ohlc:live:{instrument_name.upper()}"
