@@ -4,6 +4,7 @@ import asyncio
 import time
 from typing import Self
 
+# import re
 import aiohttp
 from loguru import logger as log
 
@@ -28,6 +29,7 @@ class TelegramClient:
     ):
         self._session = session
         self._token = token
+        #        self._token = self._cleanse(token)
         self._chat_id = chat_id
         self._last_send_time = 0.0
         # Client-side safety buffer (prevents bursting)
@@ -36,6 +38,11 @@ class TelegramClient:
 
         if not self.is_enabled:
             log.warning("TelegramClient is disabled: token or chat_id is missing.")
+
+    def _cleanse(self, value: str | None) -> str | None:
+        if not value:
+            return None
+        return re.sub(r"[^\x20-\x7E]", "", value).strip()
 
     @classmethod
     async def create(

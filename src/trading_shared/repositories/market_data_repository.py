@@ -1,12 +1,11 @@
-
 # src/trading_shared/repositories/market_data_repository.py
 
 from collections import deque
-from typing import Any, Dict
+from typing import Any
 
 import orjson
 from loguru import logger as log
-from trading_engine_core.models import StreamMessage, TakerMetrics, OHLCModel
+from trading_engine_core.models import OHLCModel, StreamMessage, TakerMetrics
 
 from trading_shared.clients.redis_client import CustomRedisClient
 
@@ -35,7 +34,7 @@ class MarketDataRepository:
         log.debug(f"Flushed batch of {len(messages)} messages to Redis stream '{stream_name}'.")
 
     # MODIFIED: Corrected type hint and added TTL parameter
-    async def cache_ticker(self, symbol: str, data: Dict[str, Any], ttl_seconds: int = 5400):
+    async def cache_ticker(self, symbol: str, data: dict[str, Any], ttl_seconds: int = 5400):
         """Caches ticker data with a 90-minute TTL."""
         redis_key = f"ticker:{symbol.upper()}"
         try:
@@ -46,7 +45,6 @@ class MarketDataRepository:
             await pipe.execute()
         except Exception:
             log.exception(f"Failed to cache ticker for {symbol}")
-
 
     async def get_ticker_data(self, instrument_name: str) -> dict[str, Any] | None:
         key = f"ticker:{instrument_name.upper()}"
@@ -86,7 +84,7 @@ class MarketDataRepository:
             await pipe.execute()
         except Exception:
             log.exception(f"Failed to update live candle for key '{key}'")
-    
+
     async def persist_ephemeral_candles(self, candles: list[OHLCModel]):
         """Persists a batch of completed candles designated as EPHEMERAL."""
         # This functionality might be better named or placed, but for now, it handles
@@ -94,7 +92,6 @@ class MarketDataRepository:
         # For this system, we only care about the live candle, so this might be a no-op
         # or could be used to store a short history.
         pass
-
 
     async def get_realtime_candle(self, exchange: str, instrument_name: str) -> dict[str, Any] | None:
         key = f"market:cache:{exchange.lower()}:ohlc:live:{instrument_name.upper()}"
