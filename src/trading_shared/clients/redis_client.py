@@ -6,7 +6,7 @@ import time
 from collections import deque
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import Any, TypeVar
+from typing import Any, TypeVar, Dict, List
 
 # --- Installed  ---
 import orjson
@@ -260,7 +260,6 @@ class CustomRedisClient:
                 # Re-raise to signal that the write operation ultimately failed.
                 raise
 
-    # --- START: REMEDIATION FOR FLAW 1 ---
     async def xadd_to_dlq(
         self,
         original_stream_name: str,
@@ -294,8 +293,6 @@ class CustomRedisClient:
             log.warning(f"{len(failed_messages)} message(s) moved to DLQ stream '{dlq_stream_name}' from '{original_stream_name}'")
         except Exception as e:
             log.critical(f"CRITICAL: Failed to write to DLQ stream '{dlq_stream_name}': {e}")
-
-    # --- END: REMEDIATION FOR FLAW 1 ---
 
     async def ensure_consumer_group(
         self,
@@ -341,7 +338,6 @@ class CustomRedisClient:
                         block=block,
                     )
 
-                    # --- CRITICAL FIX LOGIC ---
                     if not response:
                         return []  # This is a normal timeout, no new messages.
 
@@ -366,6 +362,43 @@ class CustomRedisClient:
             log.error(f"Redis connection lost while reading stream '{stream_name}'.")
             raise  # Re-raise to allow the calling loop to handle reconnection pauses.
 
+    async def read_grouped_streams(
+        self,
+        group_name: str,
+        consumer_name: str,
+        streams: Dict[str, str],
+        count: int = 10,
+        block: int = 2000,
+    ) -> List:
+        """
+        Reads messages from multiple streams using XREADGROUP.
+        Input 'streams' is a dict of {stream_name: message_id}.
+        """
+        try:
+            async def command(pool: aioredis.Redis) -> List:
+                try:
+                    response = await pool.xreadgroup(
+                        groupname=group_name,
+                        consumername=consumer_name,
+                        streams=streams,
+                        count=count,
+                        block=block,
+                    )
+                    return response if response else []
+                except redis_exceptions.ResponseError as e:
+                    if "NOGROUP" in str(e):
+                        log.warning(f"Consumer group '{group_name}' missing on some streams. Initializing...")
+                        for s_name in streams.keys():
+                            try:
+                                await pool.xgroup_create(s_name, group_name, id="0", mkstream=True)
+                            except redis_exceptions.ResponseError as re:
+                                if "BUSYGROUP" not in str(re): raise
+                        return []
+                    raise
+            return await self.execute_resiliently(command, f"XREADGROUP on {list(streams.keys())}")
+        except ConnectionError:
+            raise
+        
     async def acknowledge_message(
         self,
         stream_name: str,
@@ -403,7 +436,6 @@ class CustomRedisClient:
             log.error(f"An unexpected error occurred during XAUTOCLAIM: {e}")
             raise
 
-    # --- START: REMEDIATION FOR FLAW 2 ---
     async def get_system_state(self) -> str:
         """
         DEPRECATED: This method accesses obsolete keys and violates the centralized
@@ -415,8 +447,6 @@ class CustomRedisClient:
         raise NotImplementedError(
             "get_system_state is deprecated. Use a dedicated SystemStateManager to ensure compliance with the hierarchical state protocol."
         )
-
-    # --- END: REMEDIATION FOR FLAW 2 ---
 
     async def set_system_state(
         self,
@@ -431,8 +461,7 @@ class CustomRedisClient:
                     "reason": reason or "",
                     "timestamp": time.time(),
                 }
-                # This logic should also be migrated to a state manager.
-                # It writes to a deprecated key "system:state".
+
                 await pool.hset("system:state", mapping=state_data)
                 await pool.set("system:state:simple", state)
 
