@@ -84,25 +84,45 @@ class PostgresClient:
                 raise ConnectionError("Fatal: Could not create PostgreSQL pool.") from e
 
     async def _setup_codecs(self, connection: asyncpg.Connection):
-        # 1. JSON Codec
-        for json_type in ["jsonb", "json"]:
-            await connection.set_type_codec(
-                json_type,
-                encoder=lambda d: orjson.dumps(d).decode("utf-8"),
-                decoder=orjson.loads,
-                schema="pg_catalog",
-            )
-
-        # 2. Custom Composite Types
+        """
+        """
+        log.info("Registering custom PostgreSQL type codecs for new connection.")
         try:
-            await connection.set_type_codec("public_trade_insert_type", schema="public", format="tuple")
-            # Register Options Type
-            await connection.set_type_codec("option_trade_insert_type", schema="public", format="tuple")
-            # Also register for OHLC upserts if needed
-            await connection.set_type_codec("ohlc_upsert_type", schema="public", format="tuple")
-        except Exception:
-            pass
+            # 1. JSON/JSONB Codec (Universal)
+            for json_type in ["jsonb", "json"]:
+                await connection.set_type_codec(
+                    json_type,
+                    encoder=lambda d: orjson.dumps(d).decode("utf-8"),
+                    decoder=orjson.loads,
+                    schema="pg_catalog",
+                )
 
+            # 2. Custom Application-Specific Composite Types
+            # These are mandatory for the application to function correctly.
+            await connection.set_type_codec(
+                "public_trade_insert_type", 
+                schema="public", 
+                format="tuple"
+            )
+            await connection.set_type_codec(
+                "option_trade_insert_type", 
+                schema="public", 
+                format="tuple"
+            )
+            await connection.set_type_codec(
+                "ohlc_upsert_type", 
+                schema="public", 
+                format="tuple"
+            )
+            log.success("All custom type codecs registered successfully.")
+            
+        except Exception as e:
+            log.critical(
+                f"Failed to register a mandatory type codec. This is a fatal error. "
+                f"Ensure the database schema is up to date. Error: {e}"
+            )
+            raise
+        
     async def close(self):
         async with self._lock:
             if self._pool:
