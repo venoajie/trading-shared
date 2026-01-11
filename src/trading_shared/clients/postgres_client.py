@@ -18,7 +18,6 @@ class PostgresClient:
     """
     A resilient, instance-safe, and generic client for PostgreSQL.
     It manages a connection pool and provides generic execution methods.
-    It has no knowledge of the application's domain or schema.
     """
 
     def __init__(self, settings: PostgresSettings):
@@ -53,14 +52,21 @@ class PostgresClient:
                 asyncpg.InterfaceError,
                 TimeoutError,
             ) as e:
-                log.warning(f"Postgres command '{command_name_for_logging}' failed (attempt {attempt + 1}/{max_retries}): {e}")
+                log.warning(
+                    f"Postgres command '{command_name_for_logging}' failed (attempt {attempt + 1}/{max_retries}): {e}"
+                )
                 last_exception = e
+                # Force pool invalidation on connection errors
                 await self.close()
                 if attempt < max_retries - 1:
                     await asyncio.sleep(initial_delay * (2**attempt))
 
-        log.error(f"Postgres command '{command_name_for_logging}' failed after {max_retries} attempts.")
-        raise ConnectionError(f"Failed to execute Postgres command '{command_name_for_logging}' after retries.") from last_exception
+        log.error(
+            f"Postgres command '{command_name_for_logging}' failed after {max_retries} attempts."
+        )
+        raise ConnectionError(
+            f"Failed to execute Postgres command '{command_name_for_logging}' after retries."
+        ) from last_exception
 
     async def ensure_pool_is_ready(self) -> asyncpg.Pool:
         async with self._lock:
@@ -83,12 +89,12 @@ class PostgresClient:
 
     async def _setup_codecs(self, connection: asyncpg.Connection):
         """
-        [CORRECTED] This function is now syntactically correct and fail-fast.
-        It properly registers all required application types.
+        Registers mandatory type codecs.
         """
         log.info("Registering custom PostgreSQL type codecs for new connection.")
         try:
             # 1. JSON/JSONB Codec (Requires encoder/decoder)
+            # This is critical for reading/writing JSONB columns transparently.
             for json_type in ["jsonb", "json"]:
                 await connection.set_type_codec(
                     json_type,
@@ -96,32 +102,18 @@ class PostgresClient:
                     decoder=orjson.loads,
                     schema="pg_catalog",
                 )
-
-            # 2. Custom Composite Types (Requires format='tuple')
-            await connection.set_type_codec(
-                "public_trade_insert_type", 
-                schema="public", 
-                format="tuple"
-            )
-            # This may fail if the type doesn't exist, which is acceptable for services
-            # that don't use it. We can add optional registration later if needed.
-            # For now, keeping it explicit.
-            await connection.set_type_codec(
-                "option_trade_insert_type", 
-                schema="public", 
-                format="tuple"
-            )
-            await connection.set_type_codec(
-                "ohlc_upsert_type", 
-                schema="public", 
-                format="tuple"
-            )
-            log.success("All custom type codecs registered successfully.")
             
+            # NOTE: We do NOT strictly need to register composite types (public_trade_insert_type, etc.)
+            # here if we are passing them as lists of tuples to a SQL function that casts them
+            # (e.g. unnest($1::public.public_trade_insert_type[])).
+            # asyncpg handles the tuple -> composite mapping automatically in that context.
+            # Attempting to register them with set_type_codec without custom encoders causes crashes.
+
+            log.success("JSON codecs registered successfully.")
+
         except Exception as e:
             log.critical(
-                f"Failed to register a mandatory type codec. This is a fatal error. "
-                f"Ensure the database schema is up to date. Error: {e}"
+                f"Failed to register a mandatory type codec. Error: {e}"
             )
             raise
 
@@ -138,7 +130,9 @@ class PostgresClient:
         async def command(conn: asyncpg.Connection) -> int:
             result_str = await conn.execute(query, *args)
             try:
-                return int(result_str.split(" ")[-1])
+                # Handle "INSERT 0 5", "UPDATE 3", "SELECT 1"
+                parts = result_str.split(" ")
+                return int(parts[-1])
             except (ValueError, IndexError):
                 return 0
 
@@ -146,12 +140,18 @@ class PostgresClient:
 
     async def fetch(self, query: str, *args: Any) -> list[asyncpg.Record]:
         command_name = query.strip().split()[0].upper()
-        return await self.execute_resiliently(lambda conn: conn.fetch(query, *args), f"fetch_{command_name}")
+        return await self.execute_resiliently(
+            lambda conn: conn.fetch(query, *args), f"fetch_{command_name}"
+        )
 
     async def fetchrow(self, query: str, *args: Any) -> asyncpg.Record | None:
         command_name = query.strip().split()[0].upper()
-        return await self.execute_resiliently(lambda conn: conn.fetchrow(query, *args), f"fetchrow_{command_name}")
+        return await self.execute_resiliently(
+            lambda conn: conn.fetchrow(query, *args), f"fetchrow_{command_name}"
+        )
 
     async def fetchval(self, query: str, *args: Any) -> Any:
         command_name = query.strip().split()[0].upper()
-        return await self.execute_resiliently(lambda conn: conn.fetchval(query, *args), f"fetchval_{command_name}")
+        return await self.execute_resiliently(
+            lambda conn: conn.fetchval(query, *args), f"fetchval_{command_name}"
+        )
