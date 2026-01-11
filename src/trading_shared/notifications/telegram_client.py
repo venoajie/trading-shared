@@ -1,9 +1,8 @@
-
 # src/trading_shared/notifications/telegram_client.py
 
 import asyncio
-import time
 import re
+import time
 from typing import Self
 
 import aiohttp
@@ -12,6 +11,7 @@ from loguru import logger as log
 
 class TelegramDeliveryError(Exception):
     """Custom exception for failures after all retries."""
+
     pass
 
 
@@ -60,7 +60,8 @@ class TelegramClient:
                     log.success(f"Telegram token valid. Connected to bot: @{username}")
                     return
 
-                if response.status in:
+                # [FIX] The 'in' operator requires a collection to check against.
+                if response.status in [401, 404]:
                     raise ConnectionRefusedError("Telegram Bot Token is invalid or revoked.")
 
                 response.raise_for_status()
@@ -91,14 +92,12 @@ class TelegramClient:
         await self._enforce_client_rate_limit()
 
         api_url = f"https://api.telegram.org/bot{self._token}/sendMessage"
-        
-        # [REFACTOR] Correctly format payload for MarkdownV2.
-        # The message content is escaped, and then wrapped in a code block.
-        # This prevents API errors and ensures clean, monospaced rendering.
+
         final_text = text
         if use_code_block:
-            escaped_text = self._escape_markdown_v2(text)
-            final_text = f"```\n{escaped_text}\n```"
+            # For code blocks, no escaping is needed, but we still construct it properly.
+            # The previous implementation incorrectly mixed escaping with code blocks.
+            final_text = f"```\n{text}\n```"
         else:
             final_text = self._escape_markdown_v2(text)
 
@@ -128,8 +127,7 @@ class TelegramClient:
                     if response.status == 200:
                         log.debug("Telegram message sent successfully.")
                         return
-                    
-                    # Log detailed error for bad requests
+
                     if response.status == 400:
                         error_details = await response.text()
                         log.error(f"Telegram 400 Bad Request: {error_details}. Payload: {payload}")

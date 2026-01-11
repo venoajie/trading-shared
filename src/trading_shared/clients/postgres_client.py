@@ -1,4 +1,3 @@
-
 # src/trading_shared/clients/postgres_client.py
 
 import asyncio
@@ -52,21 +51,15 @@ class PostgresClient:
                 asyncpg.InterfaceError,
                 TimeoutError,
             ) as e:
-                log.warning(
-                    f"Postgres command '{command_name_for_logging}' failed (attempt {attempt + 1}/{max_retries}): {e}"
-                )
+                log.warning(f"Postgres command '{command_name_for_logging}' failed (attempt {attempt + 1}/{max_retries}): {e}")
                 last_exception = e
                 # Force pool invalidation on connection errors
                 await self.close()
                 if attempt < max_retries - 1:
                     await asyncio.sleep(initial_delay * (2**attempt))
 
-        log.error(
-            f"Postgres command '{command_name_for_logging}' failed after {max_retries} attempts."
-        )
-        raise ConnectionError(
-            f"Failed to execute Postgres command '{command_name_for_logging}' after retries."
-        ) from last_exception
+        log.error(f"Postgres command '{command_name_for_logging}' failed after {max_retries} attempts.")
+        raise ConnectionError(f"Failed to execute Postgres command '{command_name_for_logging}' after retries.") from last_exception
 
     async def ensure_pool_is_ready(self) -> asyncpg.Pool:
         async with self._lock:
@@ -102,7 +95,7 @@ class PostgresClient:
                     decoder=orjson.loads,
                     schema="pg_catalog",
                 )
-            
+
             # NOTE: We do NOT strictly need to register composite types (public_trade_insert_type, etc.)
             # here if we are passing them as lists of tuples to a SQL function that casts them
             # (e.g. unnest($1::public.public_trade_insert_type[])).
@@ -112,9 +105,7 @@ class PostgresClient:
             log.success("JSON codecs registered successfully.")
 
         except Exception as e:
-            log.critical(
-                f"Failed to register a mandatory type codec. Error: {e}"
-            )
+            log.critical(f"Failed to register a mandatory type codec. Error: {e}")
             raise
 
     async def close(self):
@@ -140,18 +131,12 @@ class PostgresClient:
 
     async def fetch(self, query: str, *args: Any) -> list[asyncpg.Record]:
         command_name = query.strip().split()[0].upper()
-        return await self.execute_resiliently(
-            lambda conn: conn.fetch(query, *args), f"fetch_{command_name}"
-        )
+        return await self.execute_resiliently(lambda conn: conn.fetch(query, *args), f"fetch_{command_name}")
 
     async def fetchrow(self, query: str, *args: Any) -> asyncpg.Record | None:
         command_name = query.strip().split()[0].upper()
-        return await self.execute_resiliently(
-            lambda conn: conn.fetchrow(query, *args), f"fetchrow_{command_name}"
-        )
+        return await self.execute_resiliently(lambda conn: conn.fetchrow(query, *args), f"fetchrow_{command_name}")
 
     async def fetchval(self, query: str, *args: Any) -> Any:
         command_name = query.strip().split()[0].upper()
-        return await self.execute_resiliently(
-            lambda conn: conn.fetchval(query, *args), f"fetchval_{command_name}"
-        )
+        return await self.execute_resiliently(lambda conn: conn.fetchval(query, *args), f"fetchval_{command_name}")

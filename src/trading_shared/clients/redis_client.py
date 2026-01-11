@@ -6,7 +6,7 @@ import time
 from collections import deque
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import Any, TypeVar, Dict, List
+from typing import Any, TypeVar
 
 # --- Installed  ---
 import orjson
@@ -366,16 +366,17 @@ class CustomRedisClient:
         self,
         group_name: str,
         consumer_name: str,
-        streams: Dict[str, str],
+        streams: dict[str, str],
         count: int = 10,
         block: int = 2000,
-    ) -> List:
+    ) -> list:
         """
         Reads messages from multiple streams using XREADGROUP.
         Input 'streams' is a dict of {stream_name: message_id}.
         """
         try:
-            async def command(pool: aioredis.Redis) -> List:
+
+            async def command(pool: aioredis.Redis) -> list:
                 try:
                     response = await pool.xreadgroup(
                         groupname=group_name,
@@ -392,13 +393,15 @@ class CustomRedisClient:
                             try:
                                 await pool.xgroup_create(s_name, group_name, id="0", mkstream=True)
                             except redis_exceptions.ResponseError as re:
-                                if "BUSYGROUP" not in str(re): raise
+                                if "BUSYGROUP" not in str(re):
+                                    raise
                         return []
                     raise
+
             return await self.execute_resiliently(command, f"XREADGROUP on {list(streams.keys())}")
         except ConnectionError:
             raise
-        
+
     async def acknowledge_message(
         self,
         stream_name: str,
