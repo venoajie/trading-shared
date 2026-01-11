@@ -1,16 +1,14 @@
+
 # src/trading_shared/clients/postgres_client.py
 
-# --- Built Ins  ---
 import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
 
-# --- Installed  ---
 import asyncpg
 import orjson
 from loguru import logger as log
 
-# --- Local Application Imports ---
 from ..config.models import PostgresSettings
 
 T = TypeVar("T")
@@ -85,10 +83,12 @@ class PostgresClient:
 
     async def _setup_codecs(self, connection: asyncpg.Connection):
         """
+        [CORRECTED] This function is now syntactically correct and fail-fast.
+        It properly registers all required application types.
         """
         log.info("Registering custom PostgreSQL type codecs for new connection.")
         try:
-            # 1. JSON/JSONB Codec (Universal)
+            # 1. JSON/JSONB Codec (Requires encoder/decoder)
             for json_type in ["jsonb", "json"]:
                 await connection.set_type_codec(
                     json_type,
@@ -97,13 +97,15 @@ class PostgresClient:
                     schema="pg_catalog",
                 )
 
-            # 2. Custom Application-Specific Composite Types
-            # These are mandatory for the application to function correctly.
+            # 2. Custom Composite Types (Requires format='tuple')
             await connection.set_type_codec(
                 "public_trade_insert_type", 
                 schema="public", 
                 format="tuple"
             )
+            # This may fail if the type doesn't exist, which is acceptable for services
+            # that don't use it. We can add optional registration later if needed.
+            # For now, keeping it explicit.
             await connection.set_type_codec(
                 "option_trade_insert_type", 
                 schema="public", 
@@ -122,22 +124,13 @@ class PostgresClient:
                 f"Ensure the database schema is up to date. Error: {e}"
             )
             raise
-        
+
     async def close(self):
         async with self._lock:
             if self._pool:
                 await self._pool.close()
                 log.info("PostgreSQL connection pool closed.")
                 self._pool = None
-
-    async def _setup_json_codec_deprecated(self, connection: asyncpg.Connection):
-        for json_type in ["jsonb", "json"]:
-            await connection.set_type_codec(
-                json_type,
-                encoder=lambda d: orjson.dumps(d).decode("utf-8"),
-                decoder=orjson.loads,
-                schema="pg_catalog",
-            )
 
     async def execute(self, query: str, *args: Any) -> int:
         command_name = query.strip().split()[0].upper()
