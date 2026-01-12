@@ -1,8 +1,10 @@
+
 # src/trading_shared/exchanges/websockets/binance.py
 
 # --- Built Ins ---
 import asyncio
 from collections.abc import AsyncGenerator
+from typing import Set, Dict, Any
 
 # --- Installed ---
 import orjson
@@ -49,49 +51,65 @@ class BinanceWsClient(AbstractWsClient):
         self.shard_num_for_log = self.shard_id + 1
 
         # Maps Raw (Exchange) Symbol -> Canonical (System) Symbol
-        self._symbol_map: dict[str, str] = {}
+        self._symbol_map: Dict[str, str] = {}
 
-    async def _get_channels_from_universe(self, universe: list[dict[str, any]]) -> set[str]:
+    async def _get_channels_from_universe(self, universe: list[dict[str, Any]]) -> Set[str]:
         """
-        Parses the rich universe object to extract symbols for this client's specific shard.
-        Populates self._symbol_map to ensure Ticker Cache uses Canonical names.
+        Parses the Flat Ledger (Janitor v4.2) to extract symbols for this client's specific shard.
+        Matches based on 'exchange' and 'market_type'.
         """
         my_targets = set()
         temp_map = {}
+        
+        # Determine strict or loose matching based on MarketDefinition
+        target_exchange = self.exchange_name.lower()
+        target_type = self.market_def.market_type.lower() if self.market_def.market_type else None
 
-        for asset_pair in universe:
-            # Check both spot and perp exchanges to match this client's market definition
-            if asset_pair.get("exchange_spot") == self.exchange_name:
-                if symbol := asset_pair.get("spot_symbol"):
-                    my_targets.add(symbol)
-                    # Binance Raw often strips hyphens. We assume standard convention or lookup.
-                    # Ideally, Janitor provides the 'raw_symbol' in the ledger.
-                    # Assuming standard Binance format (remove '-') for now.
-                    raw_symbol = symbol.replace("-", "").upper()
-                    temp_map[raw_symbol] = symbol
+        for entry in universe:
+            # 1. Filter by Exchange
+            entry_exchange = entry.get("exchange", "").lower()
+            if entry_exchange != target_exchange:
+                continue
 
-            if asset_pair.get("exchange_perp") == self.exchange_name:
-                if symbol := asset_pair.get("perp_symbol"):
-                    my_targets.add(symbol)
-                    raw_symbol = symbol.replace("-", "").upper()
-                    temp_map[raw_symbol] = symbol
+            # 2. Filter by Market Type (if applicable)
+            # This ensures the Spot client doesn't try to subscribe to Futures symbols and vice versa.
+            entry_type = entry.get("market_type", "").lower()
+            if target_type and target_type not in entry_type and entry_type not in target_type:
+                 # Loose match: "SPOT" matches "spot"
+                 continue
 
-        # Update the instance map
+            # 3. Extract Symbol
+            # Janitor v4.2 output uses 'symbol' alias for instrument_name
+            symbol = entry.get("symbol") or entry.get("instrument_name")
+            if not symbol:
+                continue
+
+            my_targets.add(symbol)
+            
+            # 4. Map Raw -> Canonical
+            # Binance Raw often excludes hyphens (BTCUSDT vs BTC-USDT)
+            # We assume the universe contains the Canonical ID (BTC-USDT)
+            raw_symbol = symbol.replace("-", "").upper()
+            temp_map[raw_symbol] = symbol
+
+        # Update the instance map for Ticker Cache lookups
         self._symbol_map.update(temp_map)
 
-        sharded_targets = {symbol for i, symbol in enumerate(sorted(my_targets)) if i % self.total_shards == self.shard_id}
+        # 5. Apply Sharding
+        # Deterministic sharding based on sorted symbol list
+        sorted_targets = sorted(list(my_targets))
+        sharded_targets = {
+            sym for i, sym in enumerate(sorted_targets) 
+            if i % self.total_shards == self.shard_id
+        }
 
-        # Convert canonical targets back to raw for channel subscription
+        # 6. Generate Channel Names
         channels = set()
         for canonical in sharded_targets:
-            # Reverse lookup or re-derive raw
             raw = canonical.replace("-", "").lower()
             channels.add(f"{raw}@trade")
-            channels.add(f"{raw}@ticker")  # Ensure we subscribe to ticker if needed, or rely on trade stream data if it contains price
+            channels.add(f"{raw}@ticker") 
 
-        # Optimization: If we only rely on @trade for trades, we still need @ticker for the 24h volume?
-        # The prompt implies we need 24h volume. @trade does not provide 24h volume.
-        # We MUST subscribe to @ticker or @miniTicker to populate the cache used by DataFacade.
         return channels
 
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
@@ -100,17 +118,18 @@ class BinanceWsClient(AbstractWsClient):
         active channels. Exits upon disconnection and provides detailed 404 logging.
         """
         if not self._active_channels:
-            log.warning(f"[{self.market_def.market_id}] No channels to connect to.")
+            log.warning(f"[{self.market_def.market_id}] No channels to connect to (Universe Empty or Filter Mismatch).")
             return
 
         sorted_channels = sorted(self._active_channels)
+        # Binance URL limit safety (though 1024 chars is usually the limit, shards handle this)
         url_path = "/stream?streams=" + "/".join(sorted_channels)
         full_url = self.ws_connection_url + url_path
 
         try:
             async with websockets.connect(full_url, ping_interval=180) as ws:
                 self._ws = ws
-                log.success(f"[{self.market_def.market_id}_{self.shard_num_for_log}] Shard Connected.")
+                log.success(f"[{self.market_def.market_id}_{self.shard_num_for_log}] Connected with {len(sorted_channels)} channels.")
 
                 async for message in ws:
                     try:
@@ -129,11 +148,9 @@ class BinanceWsClient(AbstractWsClient):
                                 )
 
                             # 2. Routing: Ticker Stream (for 24h Volume Cache)
-                            # Binance payload 's' is the RAW symbol (e.g. BTCUSDT)
                             if "ticker" in stream:
                                 raw_symbol = payload.get("s")
                                 if raw_symbol:
-                                    # Normalize to Canonical before Caching
                                     canonical_symbol = self._symbol_map.get(raw_symbol, raw_symbol)
                                     await self.market_data_repo.cache_ticker(canonical_symbol, payload)
 
@@ -145,10 +162,11 @@ class BinanceWsClient(AbstractWsClient):
                 log.critical(
                     f"[{self.market_def.market_id}_{self.shard_num_for_log}] 404 REJECTION. "
                     f"One or more symbols in this shard are invalid. "
-                    f"Channels in this shard: {sorted_channels}"
                 )
             raise e
-
+        except Exception as e:
+            log.error(f"[{self.market_def.market_id}] Connection Error: {e}")
+            raise e
         finally:
             self._ws = None
             log.warning(f"[{self.market_def.market_id}] WebSocket connection closed.")
@@ -159,7 +177,7 @@ class BinanceWsClient(AbstractWsClient):
             async for message in self.connect():
                 await self.market_data_repo.add_messages_to_stream(self.stream_name, [message])
         except asyncio.CancelledError:
-            pass  # Normal shutdown
+            pass
         except Exception:
             log.exception(f"[{self.market_def.market_id}] Unhandled error in message batch processor.")
 
@@ -177,9 +195,9 @@ class BinanceWsClient(AbstractWsClient):
                 self._reconnect_event.clear()
 
                 batch_task = asyncio.create_task(self._process_message_batch())
-                await batch_task  # Awaits until the connection is lost.
+                await batch_task
 
-                reconnect_attempts = 0  # Reset attempts on clean disconnect
+                reconnect_attempts = 0
             except asyncio.CancelledError:
                 break
             except Exception:
@@ -190,7 +208,7 @@ class BinanceWsClient(AbstractWsClient):
                 delay = min(2**reconnect_attempts, 60)
                 log.info(f"[{self.market_def.market_id}] Reconnecting in {delay}s...")
                 await asyncio.sleep(delay)
-                self._reconnect_event.set()  # Trigger an immediate reconnect attempt
+                self._reconnect_event.set()
 
         subscription_task.cancel()
         log.info(f"[{self.market_def.market_id}] Supervisor loop has shut down.")
@@ -198,6 +216,6 @@ class BinanceWsClient(AbstractWsClient):
     async def close(self):
         log.warning(f"[{self.market_def.market_id}] Closing client...")
         self._is_running.clear()
-        self._reconnect_event.set()  # Unblock the main loop so it can exit
+        self._reconnect_event.set()
         if self._ws:
             await self._ws.close()
