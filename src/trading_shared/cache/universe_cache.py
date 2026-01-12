@@ -1,9 +1,9 @@
 # src/trading_shared/cache/universe_cache.py
 
 import asyncio
-from typing import Any
+from typing import Dict, List, Any
 
-import orjson  # Optimization: Replaces json
+import orjson
 from loguru import logger as log
 from trading_engine_core.models import StorageMode
 
@@ -21,11 +21,12 @@ class UniverseCache:
         self._universe_key = universe_key
 
         # Maps instrument_name -> StorageMode
-        self._cache: dict[str, StorageMode] = {}
+        self._cache: Dict[str, StorageMode] = {}
         # Stores the full list of dictionaries for the Analyzer loop
-        self._raw_ledger: list[dict[str, Any]] = []
+        self._raw_ledger: List[Dict[str, Any]] = []
 
         self._lock = asyncio.Lock()
+        log.info("UniverseCache (Patch v4.2 - Library Version) initialized.")
 
     async def get_storage_mode(self, instrument_name: str) -> StorageMode:
         """
@@ -34,15 +35,19 @@ class UniverseCache:
         This prevents data loss during startup/race conditions.
         """
         async with self._lock:
-            return self._cache.get(instrument_name, StorageMode.PERSISTENT)
+            # Check exact match first
+            if instrument_name in self._cache:
+                return self._cache[instrument_name]
 
-    def get_all_instruments(self) -> list[dict[str, Any]]:
+            # Fallback: Check normalized key (e.g., ETH-USDT -> ETHUSDT) if needed
+            normalized = instrument_name.replace("-", "").replace("_", "")
+            return self._cache.get(normalized, StorageMode.PERSISTENT)
+
+    def get_all_instruments(self) -> List[Dict[str, Any]]:
         """
         Returns the full raw ledger.
         REQUIRED by Analyzer to iterate over the Broad universe.
         """
-        # Returns a reference to the list.
-        # Since _raw_ledger is replaced atomically in refresh, this is safe for reading.
         return self._raw_ledger
 
     async def refresh(self):
@@ -53,26 +58,49 @@ class UniverseCache:
                 log.warning(f"Active ledger key '{self._universe_key}' not found in Redis. Cache remains empty.")
                 return
 
-            # Optimization: Use orjson for faster deserialization
-            data = orjson.loads(raw_ledger_bytes)
+            try:
+                data = orjson.loads(raw_ledger_bytes)
+            except orjson.JSONDecodeError:
+                log.error(f"Failed to decode ledger JSON from key '{self._universe_key}'.")
+                return
+
+            if not isinstance(data, list):
+                log.error(f"Ledger data format invalid. Expected list, got {type(data)}.")
+                return
 
             new_cache = {}
-            # Legacy Robustness: Handle variable field names
+            processed_count = 0
+
             for entry in data:
-                name = entry.get("spot_symbol") or entry.get("instrument_name")
+                if not isinstance(entry, dict):
+                    continue
+
+                # [CRITICAL FIX] Support both 'symbol' (Janitor output) and 'instrument_name' (Model contract)
+                name = entry.get("symbol") or entry.get("instrument_name") or entry.get("spot_symbol")
 
                 # Logic: Check specific string "POSTGRES" to map to Enum, otherwise default to buffer
-                mode_str = entry.get("storage_mode", "REDIS_BUFFER")
-                mode = StorageMode.PERSISTENT if mode_str == "POSTGRES" else StorageMode.EPHEMERAL
+                mode_str = entry.get("storage_mode", "POSTGRES")  # Default to POSTGRES for safety
+                mode = StorageMode.PERSISTENT if mode_str in ("POSTGRES", "PERSISTENT") else StorageMode.EPHEMERAL
 
                 if name:
+                    # Storing exact name as primary key
                     new_cache[name] = mode
+
+                    # Also store normalized version for loose lookups
+                    normalized_name = name.replace("-", "").replace("_", "")
+                    if normalized_name != name:
+                        new_cache[normalized_name] = mode
+
+                    processed_count += 1
 
             async with self._lock:
                 self._cache = new_cache
                 self._raw_ledger = data
 
-            log.info(f"UniverseCache refreshed. Loaded {len(self._cache)} instruments.")
+            if processed_count > 0:
+                log.info(f"UniverseCache refreshed. Loaded {processed_count} instruments (Unique keys: {len(new_cache)}).")
+            else:
+                log.warning("UniverseCache refreshed but 0 valid instruments were found.")
 
         except Exception as e:
-            log.error(f"Failed to refresh UniverseCache: {e}")
+            log.exception(f"Unexpected error during UniverseCache refresh: {e}")
