@@ -1,4 +1,3 @@
-
 # src/trading_shared/exchanges/websockets/binance.py
 
 # --- Built Ins ---
@@ -60,7 +59,7 @@ class BinanceWsClient(AbstractWsClient):
         """
         my_targets = set()
         temp_map = {}
-        
+
         # Determine strict or loose matching based on MarketDefinition
         target_exchange = self.exchange_name.lower()
         target_type = self.market_def.market_type.lower() if self.market_def.market_type else None
@@ -75,8 +74,8 @@ class BinanceWsClient(AbstractWsClient):
             # This ensures the Spot client doesn't try to subscribe to Futures symbols and vice versa.
             entry_type = entry.get("market_type", "").lower()
             if target_type and target_type not in entry_type and entry_type not in target_type:
-                 # Loose match: "SPOT" matches "spot"
-                 continue
+                # Loose match: "SPOT" matches "spot"
+                continue
 
             # 3. Extract Symbol
             # Janitor v4.2 output uses 'symbol' alias for instrument_name
@@ -85,7 +84,7 @@ class BinanceWsClient(AbstractWsClient):
                 continue
 
             my_targets.add(symbol)
-            
+
             # 4. Map Raw -> Canonical
             # Binance Raw often excludes hyphens (BTCUSDT vs BTC-USDT)
             # We assume the universe contains the Canonical ID (BTC-USDT)
@@ -98,17 +97,14 @@ class BinanceWsClient(AbstractWsClient):
         # 5. Apply Sharding
         # Deterministic sharding based on sorted symbol list
         sorted_targets = sorted(list(my_targets))
-        sharded_targets = {
-            sym for i, sym in enumerate(sorted_targets) 
-            if i % self.total_shards == self.shard_id
-        }
+        sharded_targets = {sym for i, sym in enumerate(sorted_targets) if i % self.total_shards == self.shard_id}
 
         # 6. Generate Channel Names
         channels = set()
         for canonical in sharded_targets:
             raw = canonical.replace("-", "").lower()
             channels.add(f"{raw}@trade")
-            channels.add(f"{raw}@ticker") 
+            channels.add(f"{raw}@ticker")
 
         return channels
 
@@ -159,10 +155,7 @@ class BinanceWsClient(AbstractWsClient):
 
         except websockets.exceptions.InvalidStatus as e:
             if e.response.status_code == 404:
-                log.critical(
-                    f"[{self.market_def.market_id}_{self.shard_num_for_log}] 404 REJECTION. "
-                    f"One or more symbols in this shard are invalid. "
-                )
+                log.critical(f"[{self.market_def.market_id}_{self.shard_num_for_log}] 404 REJECTION. One or more symbols in this shard are invalid. ")
             raise e
         except Exception as e:
             log.error(f"[{self.market_def.market_id}] Connection Error: {e}")
