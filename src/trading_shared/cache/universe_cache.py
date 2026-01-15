@@ -1,12 +1,14 @@
-
 # src/trading_shared/trading_shared/cache/universe_cache.py
 
 import asyncio
+from typing import Any
+
 import orjson
-from typing import Dict, List, Any, Optional
 from loguru import logger as log
 from trading_engine_core.models import StorageMode
+
 from trading_shared.clients.redis_client import CustomRedisClient
+
 
 class UniverseCache:
     """
@@ -14,29 +16,31 @@ class UniverseCache:
     Acts as the Single Source of Truth for symbol normalization and routing.
     Synchronizes with the 'system:state:janitor:active_ledger' Redis key.
     """
+
     def __init__(self, redis_client: CustomRedisClient, universe_key: str):
         self._redis = redis_client
         self._universe_key = universe_key
 
         # Fast Lookup: RAW (BTCUSDT) -> CANONICAL (BTC-USDT)
-        self._raw_to_canonical: Dict[str, str] = {}
+        self._raw_to_canonical: dict[str, str] = {}
         # Storage Rules: CANONICAL -> StorageMode
-        self._storage_cache: Dict[str, StorageMode] = {}
+        self._storage_cache: dict[str, StorageMode] = {}
         # Iteration List: List of all active instrument dicts (for Analyzer)
-        self._instrument_list: List[Dict[str, Any]] = []
+        self._instrument_list: list[dict[str, Any]] = []
 
         self._lock = asyncio.Lock()
 
-    def get_canonical_name(self, raw_symbol: str) -> Optional[str]:
+    def get_canonical_name(self, raw_symbol: str) -> str | None:
         """
         Normalizes a raw symbol. Returns None if symbol is not in the active universe.
         This provides the 'Strict Gating' capability.
         """
-        if not raw_symbol: return None
+        if not raw_symbol:
+            return None
         lookup_key = raw_symbol.strip().replace("-", "").replace("_", "").upper()
         return self._raw_to_canonical.get(lookup_key)
 
-    def get_all_instruments(self) -> List[Dict[str, Any]]:
+    def get_all_instruments(self) -> list[dict[str, Any]]:
         """Returns the full list of active instruments (Thread-safe due to copy-on-write)."""
         return self._instrument_list
 
@@ -63,7 +67,8 @@ class UniverseCache:
                 # Schema Compatibility: Support 'instrument_name' (Model) and 'symbol' (Janitor's SQL alias)
                 name = entry.get("instrument_name") or entry.get("symbol")
                 exchange = entry.get("exchange")
-                if not name or not exchange: continue
+                if not name or not exchange:
+                    continue
 
                 # 1. Build List for Analyzer
                 clean_entry = entry.copy()
@@ -73,7 +78,7 @@ class UniverseCache:
                 # 2. Build Normalization Map
                 raw_key = name.replace("-", "").replace("_", "").upper()
                 new_canonical[raw_key] = name
-                new_canonical[name.upper()] = name # Identity mapping
+                new_canonical[name.upper()] = name  # Identity mapping
 
                 # 3. Build Storage Map
                 new_storage[name] = StorageMode.PERSISTENT

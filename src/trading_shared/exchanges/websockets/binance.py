@@ -1,21 +1,33 @@
-
 # src/trading_shared/trading_shared/exchanges/websockets/binance.py
 
 import asyncio
 from collections.abc import AsyncGenerator
-from typing import Set, Dict, Any
+from typing import Any
+
 import orjson
 import websockets
 from loguru import logger as log
 from trading_engine_core.models import MarketDefinition, StreamMessage
+
 from ...config.models import ExchangeSettings
 from ...repositories.instrument_repository import InstrumentRepository
 from ...repositories.market_data_repository import MarketDataRepository
 from ...repositories.system_state_repository import SystemStateRepository
 from .base import AbstractWsClient
 
+
 class BinanceWsClient(AbstractWsClient):
-    def __init__(self, market_definition: MarketDefinition, market_data_repo: MarketDataRepository, instrument_repo: InstrumentRepository, system_state_repo: SystemStateRepository, universe_state_key: str, settings: ExchangeSettings, shard_id: int, total_shards: int):
+    def __init__(
+        self,
+        market_definition: MarketDefinition,
+        market_data_repo: MarketDataRepository,
+        instrument_repo: InstrumentRepository,
+        system_state_repo: SystemStateRepository,
+        universe_state_key: str,
+        settings: ExchangeSettings,
+        shard_id: int,
+        total_shards: int,
+    ):
         super().__init__(market_definition, market_data_repo, shard_id=shard_id, total_shards=total_shards)
         self.system_state_repo = system_state_repo
         self.universe_state_key = universe_state_key
@@ -23,7 +35,7 @@ class BinanceWsClient(AbstractWsClient):
         self._ws: websockets.WebSocketClientProtocol | None = None
         self.shard_num_for_log = self.shard_id + 1
 
-    async def _get_channels_from_universe(self, universe: list[dict[str, Any]]) -> Set[str]:
+    async def _get_channels_from_universe(self, universe: list[dict[str, Any]]) -> set[str]:
         my_targets = {
             entry.get("symbol") or entry.get("instrument_name")
             for entry in universe
@@ -76,7 +88,7 @@ class BinanceWsClient(AbstractWsClient):
                     await self.market_data_repo.add_messages_to_stream(self.stream_name, messages_to_write)
                     log.success(f"Wrote {len(messages_to_write)} messages to Redis stream '{self.stream_name}'.")
                     messages_to_write = []
-            
+
             # Write any remaining messages
             if messages_to_write:
                 await self.market_data_repo.add_messages_to_stream(self.stream_name, messages_to_write)
@@ -112,4 +124,5 @@ class BinanceWsClient(AbstractWsClient):
         log.warning(f"[{self.market_def.market_id}] Closing client...")
         self._is_running.clear()
         self._reconnect_event.set()
-        if self._ws: await self._ws.close()
+        if self._ws:
+            await self._ws.close()
