@@ -25,6 +25,7 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["trading_shared*"]
 
 
 # Defines optional dependencies for development, testing, and releasing.
