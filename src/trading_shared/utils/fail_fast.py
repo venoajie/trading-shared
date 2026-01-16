@@ -6,21 +6,22 @@ tasks cause the process to exit loudly, triggering container restarts.
 
 Usage:
     from shared.utils.fail_fast import create_fail_fast_task
-    
+
     task = create_fail_fast_task(my_coroutine(), name="my_task")
 """
 
-import sys
 import asyncio
+import sys
 import traceback
-from typing import Coroutine, Optional
+from collections.abc import Coroutine
+
 from loguru import logger as log
 
 
 def _task_exception_handler(task: asyncio.Task, context: str) -> None:
     """
     Callback that handles task exceptions by logging and killing the process.
-    
+
     Args:
         task: The asyncio Task that completed
         context: Human-readable description of what the task was doing
@@ -44,22 +45,22 @@ def _task_exception_handler(task: asyncio.Task, context: str) -> None:
 def create_fail_fast_task(
     coro: Coroutine,
     *,
-    name: Optional[str] = None,
+    name: str | None = None,
 ) -> asyncio.Task:
     """
     Create an asyncio task with fail-fast error handling.
-    
+
     If the task raises an unhandled exception, the entire process will exit
     with code 1, causing Docker to restart the container.
-    
+
     Args:
         coro: The coroutine to run as a task
         name: Human-readable name for the task (used in logs)
-    
+
     Returns:
         asyncio.Task with fail-fast callback attached
     """
     task = asyncio.create_task(coro)
-    context_name = name or getattr(coro, '__name__', 'unnamed_task')
+    context_name = name or getattr(coro, "__name__", "unnamed_task")
     task.add_done_callback(lambda t: _task_exception_handler(t, context_name))
     return task
