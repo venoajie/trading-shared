@@ -108,7 +108,7 @@ class TestPortfolioMarginCalculator:
                 }
             },
         }
-        result = await calculator.calculate_margins(account_state, hypothetical_positions)
+        await calculator.calculate_margins(account_state, hypothetical_positions)
         call_args = mock_api_client.simulate_pme.call_args[0][0]
         assert call_args["BTC-PERPETUAL"] == 2.0
         assert call_args["ETH-PERPETUAL"] == 5.0
@@ -198,6 +198,6 @@ class TestPortfolioMarginCalculator:
                 }
             },
         }
-        result = await calculator.calculate_margins(account_state)
+        await calculator.calculate_margins(account_state)
         call_args = mock_api_client.simulate_pme.call_args[0][0]
         assert call_args["BTC-PERPETUAL"] == 1.5

@@ -133,7 +133,7 @@ class TestPortfolioMarginCalculator:
         }
 
         # Act
-        result = await calculator.calculate_margins(account_state, hypothetical_positions)
+        await calculator.calculate_margins(account_state, hypothetical_positions)
 
         # Assert
         call_args = mock_api_client.simulate_pme.call_args[0][0]
@@ -251,7 +251,7 @@ class TestPortfolioMarginCalculator:
         }
 
         # Act
-        result = await calculator.calculate_margins(account_state)
+        await calculator.calculate_margins(account_state)
 
         # Assert
         call_args = mock_api_client.simulate_pme.call_args[0][0]
