@@ -3,8 +3,6 @@
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-import pytest
-
 from trading_shared.exchanges.transformers import (
     transform_binance_instrument_to_canonical,
     transform_deribit_instrument_to_canonical,

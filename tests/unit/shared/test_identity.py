@@ -9,7 +9,6 @@ Tests cover:
 - Error handling
 """
 
-import asyncio
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 

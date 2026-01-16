@@ -10,8 +10,7 @@ Tests cover:
 """
 
 import os
-from pathlib import Path
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import mock_open, patch
 
 import pytest
 from pydantic import ValidationError
@@ -129,9 +128,7 @@ class TestUniverseConfig:
                     "filter_market_type": "spot",
                 }
             },
-            "strategy_mapping": {
-                "strategy1": {"consumes_universe": "tradable_spots"}
-            },
+            "strategy_mapping": {"strategy1": {"consumes_universe": "tradable_spots"}},
         }
 
         # Act

@@ -8,8 +8,6 @@ Tests cover:
 - Edge cases and combinations
 """
 
-import pytest
-
 from trading_shared.utils.asset_utils import normalize_base_asset
 
 

@@ -1,7 +1,6 @@
 # tests/trading_shared/utils/test_identity.py
 """Unit tests for identity management utilities."""
 
-import asyncio
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 

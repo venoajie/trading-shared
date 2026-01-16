@@ -1,7 +1,6 @@
 # tests/trading_shared/utils/test_fail_fast.py
 
 import asyncio
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest

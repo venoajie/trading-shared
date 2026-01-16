@@ -1,7 +1,6 @@
 # tests/unit/shared/test_binance_websocket.py
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from trading_engine_core.models import MarketDefinition

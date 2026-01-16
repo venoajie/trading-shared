@@ -11,8 +11,6 @@ Tests cover:
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-import pytest
-
 from trading_shared.exchanges.transformers import (
     transform_binance_instrument_to_canonical,
     transform_deribit_instrument_to_canonical,
@@ -28,9 +26,7 @@ class TestTransformBinanceInstrumentToCanonical:
             "symbol": "BTCUSDT",
             "baseAsset": "BTC",
             "quoteAsset": "USDT",
-            "filters": [
-                {"filterType": "PRICE_FILTER", "tickSize": "0.01"}
-            ],
+            "filters": [{"filterType": "PRICE_FILTER", "tickSize": "0.01"}],
         }
 
         # Act
@@ -56,9 +52,7 @@ class TestTransformBinanceInstrumentToCanonical:
             "marginAsset": "USDT",
             "contractType": "PERPETUAL",
             "contractSize": 1,
-            "filters": [
-                {"filterType": "PRICE_FILTER", "tickSize": "0.1"}
-            ],
+            "filters": [{"filterType": "PRICE_FILTER", "tickSize": "0.1"}],
         }
 
         # Act

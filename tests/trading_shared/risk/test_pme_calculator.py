@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from trading_shared.risk.models import MarginCalculationResult
 from trading_shared.risk.pme_calculator import PortfolioMarginCalculator
 
 

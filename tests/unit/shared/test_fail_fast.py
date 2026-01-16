@@ -10,7 +10,6 @@ Tests cover:
 """
 
 import asyncio
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest

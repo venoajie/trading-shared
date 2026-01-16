@@ -1,8 +1,6 @@
 # tests/trading_shared/utils/test_asset_utils.py
 """Unit tests for asset_utils module."""
 
-import pytest
-
 from trading_shared.utils.asset_utils import normalize_base_asset
 
 

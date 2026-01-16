@@ -12,8 +12,6 @@ Tests cover:
 import time
 import uuid
 
-import pytest
-
 from trading_shared.utils.labelling import (
     generate_closing_label,
     generate_strategy_label,

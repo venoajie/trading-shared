@@ -10,6 +10,7 @@ import pytest
 def reset_environment():
     """Reset environment variables between tests."""
     import os
+
     original_env = os.environ.copy()
     yield
     os.environ.clear()

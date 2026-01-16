@@ -1,6 +1,5 @@
 # tests/trading_shared/exchanges/test_mappers.py
 
-import pytest
 from trading_engine_core.enums import MarketType
 
 from trading_shared.exchanges.mappers import get_canonical_market_type
