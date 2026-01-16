@@ -10,14 +10,18 @@ dependencies = [
     "asyncpg==0.30.0",
     "loguru==0.7.2",
     "orjson==3.11.4",
+    "pydantic>=2.0.0",
     "redis==7.1.0",
     "websockets==15.0.1",  
     "tenacity==9.1.2",
     "trading-engine-core @ git+https://github.com/venoajie/trading-engine-core.git@v0.3.7"
 ]
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
