@@ -63,4 +63,4 @@ def load_universe_config() -> UniverseConfig:
             config_data = tomli.load(f)
         return UniverseConfig.model_validate(config_data)
     except Exception as e:
-        raise RuntimeError(f"UniverseConfig validation failed for {path.absolute()}: {e}")
+        raise RuntimeError(f"UniverseConfig validation failed for {path.absolute()}: {e}") from e

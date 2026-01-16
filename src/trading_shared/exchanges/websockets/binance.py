@@ -41,7 +41,7 @@ class BinanceWsClient(AbstractWsClient):
             for entry in universe
             if (entry.get("exchange", "").lower() == self.exchange_name.lower()) and ("spot" in entry.get("market_type", "").lower())
         }
-        sharded_targets = {sym for i, sym in enumerate(sorted(list(my_targets))) if i % self.total_shards == self.shard_id}
+        sharded_targets = {sym for i, sym in enumerate(sorted(my_targets)) if i % self.total_shards == self.shard_id}
         return {f"{sym.replace('-', '').lower()}@trade" for sym in sharded_targets}
 
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
