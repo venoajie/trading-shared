@@ -614,6 +614,14 @@ class CustomRedisClient:
         """Deletes a key from Redis."""
         return await self.execute_resiliently(lambda pool: pool.delete(key), f"DELETE {key}")
 
+    async def setex(self, key: str, ttl: int, value: str):
+        """Sets a key with an expiration time (in seconds)."""
+        return await self.execute_resiliently(lambda pool: pool.setex(key, ttl, value), f"SETEX {key}")
+
+    async def exists(self, key: str) -> int:
+        """Checks if a key exists. Returns 1 if exists, 0 otherwise."""
+        return await self.execute_resiliently(lambda pool: pool.exists(key), f"EXISTS {key}")
+
     async def llen(self, key: str) -> int:
         """Returns the length of a list in Redis."""
         return await self.execute_resiliently(lambda pool: pool.llen(key), f"LLEN {key}")
