@@ -13,9 +13,6 @@ dependencies = [
     "redis==7.1.0",
     "websockets==15.0.1",  
     "tenacity==9.1.2",
-    # latta ai related packages
-    "latta-python-recorder",
-    "python-dotenv",
     "trading-engine-core @ git+https://github.com/venoajie/trading-engine-core.git@v0.3.7"
 ]
 [build-system]
