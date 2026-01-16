@@ -44,4 +44,4 @@ jobs:
           python -m pytest \
             --cov=src \
             --cov-report=xml \
-            --cov-fail-under=10
+            --cov-fail-under=90
