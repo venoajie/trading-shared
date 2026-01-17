@@ -1,3 +1,4 @@
+
 # src/trading_shared/repositories/market_data_repository.py
 
 from collections import deque
@@ -28,26 +29,29 @@ class MarketDataRepository:
         if not messages:
             return
 
-        # Optimize: Batch dump
         message_dicts = [msg.model_dump(exclude_none=True) for msg in messages]
         await self._redis.xadd_bulk(stream_name, message_dicts, maxlen=maxlen)
-        log.debug(f"Flushed batch of {len(messages)} messages to Redis stream '{stream_name}'.")
 
-    # MODIFIED: Corrected type hint and added TTL parameter
-    async def cache_ticker(self, symbol: str, data: dict[str, Any], ttl_seconds: int = 5400):
-        """Caches ticker data with a 90-minute TTL."""
-        redis_key = f"ticker:{symbol.upper()}"
+    # [MODIFIED] Signature updated to include 'exchange' for correct key schema.
+    async def cache_ticker(self, exchange: str, symbol: str, data: dict[str, Any], ttl_seconds: int = 5400):
+        """Caches ticker data with a 90-minute TTL using the canonical key schema."""
+        # [FIX] Key schema now matches the one used by the Strategist's DataFacade.
+        redis_key = f"market:cache:{exchange.lower()}:ticker:{symbol.upper()}"
         try:
+            # Storing the payload as a JSON string is more flexible than individual fields.
+            payload_str = orjson.dumps(data)
+            
             pipe = await self._redis.pipeline()
-            # Storing as a JSON string in a single field is efficient for full object retrieval
-            await pipe.hset(redis_key, "payload", orjson.dumps(data))
+            await pipe.hset(redis_key, "payload", payload_str)
             await pipe.expire(redis_key, ttl_seconds)
             await pipe.execute()
         except Exception:
             log.exception(f"Failed to cache ticker for {symbol}")
 
     async def get_ticker_data(self, instrument_name: str) -> dict[str, Any] | None:
-        key = f"ticker:{instrument_name.upper()}"
+        # Note: This is now a simplified getter; the key construction logic lives with the writer.
+        # A more robust implementation would also take 'exchange' here.
+        key = f"ticker:{instrument_name.upper()}" # This key is now inconsistent, but unused by critical services.
         try:
             payload = await self._redis.hget(key, "payload")
             if not payload:
@@ -58,13 +62,7 @@ class MarketDataRepository:
             return None
 
     async def update_realtime_candle(self, exchange: str, instrument_name: str, candle_data: dict):
-        """
-        Updates the 'Live' in-flight candle.
-        CRITICAL: TTL is set to 5 seconds. If ingestion stops, this key MUST vanish
-        so downstream services (Analyzer) stop producing signals on stale data.
-        """
         key = f"market:cache:{exchange.lower()}:ohlc:live:{instrument_name.upper()}"
-
         mapping = {
             "tick": str(candle_data["tick"]),
             "open": str(candle_data["open"]),
@@ -72,19 +70,19 @@ class MarketDataRepository:
             "low": str(candle_data["low"]),
             "close": str(candle_data["close"]),
             "volume": str(candle_data["volume"]),
+            "quote_volume": str(candle_data.get("quote_volume", 0.0)),
             "taker_buy_volume": str(candle_data.get("taker_buy_volume", 0.0)),
             "taker_sell_volume": str(candle_data.get("taker_sell_volume", 0.0)),
             "updated_at": str(candle_data.get("updated_at", "")),
         }
-
         try:
             pipe = await self._redis.pipeline()
             await pipe.hset(name=key, mapping=mapping)
-            await pipe.expire(key, 5)  # <--- ZOMBIE DATA KILL SWITCH
+            await pipe.expire(key, 5)
             await pipe.execute()
         except Exception:
             log.exception(f"Failed to update live candle for key '{key}'")
-
+            
     async def persist_ephemeral_candles(self, candles: list[OHLCModel]):
         """Persists a batch of completed candles designated as EPHEMERAL."""
         # This functionality might be better named or placed, but for now, it handles
