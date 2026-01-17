@@ -1,4 +1,3 @@
-
 # src/trading_shared/repositories/market_data_repository.py
 
 from collections import deque
@@ -40,7 +39,7 @@ class MarketDataRepository:
         try:
             # Storing the payload as a JSON string is more flexible than individual fields.
             payload_str = orjson.dumps(data)
-            
+
             pipe = await self._redis.pipeline()
             await pipe.hset(redis_key, "payload", payload_str)
             await pipe.expire(redis_key, ttl_seconds)
@@ -51,7 +50,7 @@ class MarketDataRepository:
     async def get_ticker_data(self, instrument_name: str) -> dict[str, Any] | None:
         # Note: This is now a simplified getter; the key construction logic lives with the writer.
         # A more robust implementation would also take 'exchange' here.
-        key = f"ticker:{instrument_name.upper()}" # This key is now inconsistent, but unused by critical services.
+        key = f"ticker:{instrument_name.upper()}"  # This key is now inconsistent, but unused by critical services.
         try:
             payload = await self._redis.hget(key, "payload")
             if not payload:
@@ -82,7 +81,7 @@ class MarketDataRepository:
             await pipe.execute()
         except Exception:
             log.exception(f"Failed to update live candle for key '{key}'")
-            
+
     async def persist_ephemeral_candles(self, candles: list[OHLCModel]):
         """Persists a batch of completed candles designated as EPHEMERAL."""
         # This functionality might be better named or placed, but for now, it handles
