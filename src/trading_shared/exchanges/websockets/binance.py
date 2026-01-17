@@ -36,12 +36,22 @@ class BinanceWsClient(AbstractWsClient):
         self.shard_num_for_log = self.shard_id + 1
 
     async def _get_channels_from_universe(self, universe: list[dict[str, Any]]) -> set[str]:
+        # 1. Identify valid targets (Spot instruments)
         my_targets = {
             entry.get("symbol") or entry.get("instrument_name")
             for entry in universe
             if (entry.get("exchange", "").lower() == self.exchange_name.lower()) and ("spot" in entry.get("market_type", "").lower())
         }
+
+        # 2. Apply Sharding
         sharded_targets = {sym for i, sym in enumerate(sorted(my_targets)) if i % self.total_shards == self.shard_id}
+
+        # 3. [FIX] Determine Subscription Type (Trade vs Ticker)
+        # We check the 'market_type' of the Client Configuration, not the Instrument.
+        if "ticker" in self.market_def.market_type.value:
+            return {f"{sym.replace('-', '').lower()}@ticker" for sym in sharded_targets}
+
+        # Default to Trade streams
         return {f"{sym.replace('-', '').lower()}@trade" for sym in sharded_targets}
 
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
@@ -59,15 +69,26 @@ class BinanceWsClient(AbstractWsClient):
                         data = orjson.loads(message)
                         payload = data.get("data")
                         stream = data.get("stream")
-                        if payload and stream and "trade" in stream:
-                            # [CRITICAL LOGGING] Verify that messages are being received and parsed
-                            log.info(f"Received trade for {payload.get('s')}")
-                            yield StreamMessage(
-                                exchange=self.exchange_name,
-                                channel=stream,
-                                timestamp=payload.get("T"),
-                                data=payload,
-                            )
+
+                        # [FIX] Support both 'trade' and 'ticker' streams
+                        if payload and stream:
+                            is_trade = "trade" in stream
+                            is_ticker = "ticker" in stream
+
+                            if is_trade or is_ticker:
+                                # Tickers use 'E' (Event Time), Trades use 'T' (Trade Time)
+                                ts = payload.get("T") or payload.get("E")
+
+                                # Log occasionally to prove liveness (First shard only)
+                                if self.shard_id == 0 and is_ticker and "BTC" in payload.get("s", ""):
+                                    log.trace(f"Tick: {payload.get('s')} Price: {payload.get('c')}")
+
+                                yield StreamMessage(
+                                    exchange=self.exchange_name,
+                                    channel=stream,
+                                    timestamp=ts,
+                                    data=payload,
+                                )
                     except (orjson.JSONDecodeError, KeyError, TypeError):
                         log.warning("Failed to decode or parse Binance message.")
         except websockets.exceptions.InvalidStatus as e:
@@ -79,20 +100,15 @@ class BinanceWsClient(AbstractWsClient):
 
     async def _process_message_batch(self):
         try:
-            # [CRITICAL FIX] Ensure the async generator is properly iterated
             messages_to_write = []
             async for message in self.connect():
                 messages_to_write.append(message)
-                # Write in batches to be efficient but responsive
                 if len(messages_to_write) >= 100:
                     await self.market_data_repo.add_messages_to_stream(self.stream_name, messages_to_write)
-                    log.success(f"Wrote {len(messages_to_write)} messages to Redis stream '{self.stream_name}'.")
                     messages_to_write = []
 
-            # Write any remaining messages
             if messages_to_write:
                 await self.market_data_repo.add_messages_to_stream(self.stream_name, messages_to_write)
-                log.success(f"Wrote final {len(messages_to_write)} messages to Redis stream '{self.stream_name}'.")
 
         except asyncio.CancelledError:
             pass
@@ -113,9 +129,7 @@ class BinanceWsClient(AbstractWsClient):
             except Exception:
                 log.exception(f"[{self.market_def.market_id}] Supervisor error.")
                 if self._is_running.is_set():
-                    delay = 5
-                    log.info(f"Reconnecting in {delay}s...")
-                    await asyncio.sleep(delay)
+                    await asyncio.sleep(5)
                     self._reconnect_event.set()
         subscription_task.cancel()
         log.info(f"[{self.market_def.market_id}] Supervisor loop has shut down.")
