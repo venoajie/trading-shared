@@ -1,4 +1,3 @@
-
 # src/trading_shared/trading_shared/utils/healthcheck.py
 
 import asyncio
@@ -53,10 +52,7 @@ class DeadManSwitch:
 
         self._running = True
         # [FIX] Use create_fail_fast_task to ensure any crash is fatal
-        self._task = create_fail_fast_task(
-            self._heartbeat_loop(),
-            name=f"{self.service_name}_heartbeat"
-        )
+        self._task = create_fail_fast_task(self._heartbeat_loop(), name=f"{self.service_name}_heartbeat")
         log.info(f"Dead Man's Switch started for {self.service_name} (interval={self.heartbeat_interval}s, ttl={self.heartbeat_ttl}s)")
 
     async def stop(self):

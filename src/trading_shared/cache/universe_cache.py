@@ -1,4 +1,3 @@
-
 # src/trading_shared/trading_shared/cache/universe_cache.py
 
 import asyncio
@@ -57,7 +56,8 @@ class UniverseCache:
 
             for entry in data:
                 name = entry.get("instrument_name") or entry.get("symbol")
-                if not name: continue
+                if not name:
+                    continue
 
                 # 1. Build List for Iteration
                 new_list.append(entry)
