@@ -1,3 +1,4 @@
+
 # src/trading_shared/clients/redis_client.py
 
 # --- Built Ins  ---
@@ -606,6 +607,18 @@ class CustomRedisClient:
 
     async def lpush(self, key: str, value: str | bytes):
         return await self.execute_resiliently(lambda pool: pool.lpush(key, value), f"LPUSH {key}")
+
+    async def lrange(self, key: str, start: int, end: int) -> list:
+        """Returns a range of elements from a list."""
+        return await self.execute_resiliently(
+            lambda pool: pool.lrange(key, start, end), f"LRANGE {key}"
+        )
+
+    async def ltrim(self, key: str, start: int, end: int) -> bool:
+        """Trim the list at key to the specified range."""
+        return await self.execute_resiliently(
+            lambda pool: pool.ltrim(key, start, end), f"LTRIM {key}"
+        )
 
     async def brpop(self, key: str, timeout: int) -> tuple[bytes, bytes] | None:
         return await self.execute_resiliently(lambda pool: pool.brpop(key, timeout=timeout), f"BRPOP {key}")
