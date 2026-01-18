@@ -1,5 +1,6 @@
 # src/trading_shared/core/models.py
 
+
 from datetime import datetime
 from typing import Any, Literal
 
@@ -81,9 +82,10 @@ class OHLCModel(AppBaseModel):
     low: float
     close: float
     volume: float = Field(..., description="Total volume (taker_buy + taker_sell).")
-    
-    # [FIX] Added quote_volume to prevent Aggregator crashes (Schema Parity v2.0)
+
+    # [FIX] Added quote_volume and trade_count to match Aggregator v2.0 logic
     quote_volume: float = Field(default=0.0, description="Volume in quote currency (Price * Quantity).")
+    trade_count: int = Field(default=0, description="Number of individual trades aggregated in this candle.")
 
     # --- Microstructure Metrics ---
     taker_buy_volume: float = Field(default=0.0, description="Volume where buyer was taker (Aggressive Buy).")
