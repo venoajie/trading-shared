@@ -29,6 +29,7 @@ class UniverseCache:
     def get_canonical_name(self, raw_symbol: str) -> str | None:
         if not raw_symbol:
             return None
+        # Normalization: STRIP -> REMOVE '-'/'_' -> UPPER
         lookup_key = raw_symbol.strip().replace("-", "").replace("_", "").upper()
         return self._raw_to_canonical.get(lookup_key)
 
@@ -62,12 +63,14 @@ class UniverseCache:
                 # 1. Build List for Iteration
                 new_list.append(entry)
 
-                # 2. Build Normalization Map
+                # 2. Build Normalization Map (Bidirectional robustness)
+                # Key: BTCUSDT -> Value: BTC-USDT
                 raw_key = name.replace("-", "").replace("_", "").upper()
                 new_canonical[raw_key] = name
+                # Key: BTC-USDT -> Value: BTC-USDT (Self-reference)
                 new_canonical[name.upper()] = name
 
-                # 3. [FIX] Build Storage Map from payload
+                # 3. Build Storage Map
                 tier_str = entry.get("storage_tier", "EPHEMERAL").upper()
                 new_storage[name] = StorageMode[tier_str]
 
@@ -77,5 +80,9 @@ class UniverseCache:
                 self._instrument_list = new_list
 
             log.info(f"UniverseCache refreshed. {len(new_list)} instruments loaded.")
+            # Diagnostic log to verify mapping
+            sample_keys = list(new_canonical.keys())[:5]
+            log.debug(f"UniverseCache Sample Keys: {sample_keys}")
+            
         except Exception as e:
             log.exception(f"UniverseCache refresh failed: {e}")
