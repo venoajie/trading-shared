@@ -8,8 +8,7 @@ Tests cover:
 - Edge cases and unknown types
 """
 
-from trading_engine_core.enums import MarketType
-
+from trading_shared.core.enums import MarketType
 from trading_shared.exchanges.mappers import get_canonical_market_type
 
 

@@ -10,10 +10,8 @@ import orjson
 import websockets
 from loguru import logger as log
 
-# --- Shared Library Imports ---
-from trading_engine_core.models import MarketDefinition, StreamMessage
-
 # --- Local Application Imports ---
+from ...core.models import MarketDefinition, StreamMessage
 from ...config.models import ExchangeSettings
 from ...repositories.instrument_repository import InstrumentRepository
 from ...repositories.market_data_repository import MarketDataRepository

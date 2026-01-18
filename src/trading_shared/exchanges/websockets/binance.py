@@ -7,9 +7,9 @@ from typing import Any
 import orjson
 import websockets
 from loguru import logger as log
-from trading_engine_core.models import MarketDefinition, StreamMessage
 
 from ...config.models import ExchangeSettings
+from ...core.models import MarketDefinition, StreamMessage
 from ...repositories.instrument_repository import InstrumentRepository
 from ...repositories.market_data_repository import MarketDataRepository
 from ...repositories.system_state_repository import SystemStateRepository

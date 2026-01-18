@@ -5,9 +5,9 @@ from typing import Any
 
 import orjson
 from loguru import logger as log
-from trading_engine_core.models import StorageMode
 
 from trading_shared.clients.redis_client import CustomRedisClient
+from trading_shared.core.models import StorageMode
 
 
 class UniverseCache:

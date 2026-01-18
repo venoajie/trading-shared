@@ -4,7 +4,7 @@
 from typing import Any
 
 # --- Shared Library Imports  ---
-from trading_engine_core.enums import MarketType
+from trading_shared.core.enums import MarketType
 
 
 def get_canonical_market_type(

@@ -8,9 +8,9 @@ from collections.abc import AsyncGenerator
 
 # --- Installed ---
 from loguru import logger as log
-from trading_engine_core.models import MarketDefinition, StreamMessage
 
 # --- Local Application Imports ---
+from trading_shared.core.models import MarketDefinition, StreamMessage
 from ...repositories.market_data_repository import MarketDataRepository
 
 

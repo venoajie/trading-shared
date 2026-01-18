@@ -5,9 +5,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import orjson
 import pytest
-from trading_engine_core.models import StorageMode
 
 from trading_shared.cache.universe_cache import UniverseCache
+from trading_shared.core.models import StorageMode
 
 
 class TestUniverseCache:
