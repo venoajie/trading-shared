@@ -14,48 +14,46 @@ class UniverseCache:
     1. Base Layer: The static universe definition (from Janitor/Config).
     2. Spotlight Layer: Dynamic overrides (promotions) from Strategist.
     
-    This ensures that when an asset is promoted to PERSISTENT, all consumers 
-    (Distributor, Analyzer) immediately respect the new storage mode.
+    Reliability:
+    - Handles List vs Dict input formats robustly.
+    - Merges Spotlight overrides dynamically.
+    - Thread-safe atomic updates.
     """
 
     def __init__(self, redis_client: CustomRedisClient, universe_key: str):
         self._redis = redis_client
         self.universe_key = universe_key
-        # [NEW] The "Spotlight" Key defined in DATA_CONTRACTS.md
         self.override_key = "system:map:strategist:overrides"
         
         # Local Memory Caches
         self._instrument_map: Dict[str, Dict] = {} 
         self._overrides: Dict[str, str] = {}
-        # Pre-computed map for Distributor's fast lookup
         self._raw_to_canonical_map: Dict[str, str] = {}
 
     async def refresh(self):
-        """
-        Refreshes both the standard universe and the dynamic overrides from Redis.
-        """
+        """Refreshes standard universe and dynamic spotlight overrides."""
         try:
-            # 1. Load Standard Universe (The "Base" Layer)
+            # 1. Load Standard Universe (Base Layer)
             data = await self._redis.get(self.universe_key)
+            new_map = {}
+            
             if data:
                 raw_universe = orjson.loads(data)
                 
-                # [FIX] Resilient Parsing: Handle both List and Dict formats from Janitor
+                # [SAFETY] Handle List vs Dict ambiguity
                 if isinstance(raw_universe, list):
-                    # Convert List -> Dict keyed by instrument_name
-                    self._instrument_map = {}
                     for item in raw_universe:
-                        # Fallback to 'symbol' if 'instrument_name' is missing
+                        # Resilient Key Extraction
                         key = item.get("instrument_name") or item.get("symbol")
                         if key:
-                            self._instrument_map[key] = item
+                            new_map[key] = item
                 elif isinstance(raw_universe, dict):
-                    self._instrument_map = raw_universe
-                else:
-                    log.error(f"Universe data is of unexpected type: {type(raw_universe)}")
-                    # Do not clear existing cache on malformed update
+                    new_map = raw_universe
             
-            # 2. Load Overrides (The "Spotlight" Layer)
+            # Atomic Assignment (Thread Safety)
+            self._instrument_map = new_map
+            
+            # 2. Load Spotlight Overrides (Dynamic Layer)
             overrides_data = await self._redis.hgetall(self.override_key)
             if overrides_data:
                 self._overrides = {
@@ -64,61 +62,58 @@ class UniverseCache:
             else:
                 self._overrides = {}
             
-            # 3. Rebuild the optimized map
+            # 3. Rebuild O(1) Lookup Map for Distributor
             self._rebuild_canonical_map()
             
         except Exception as e:
             log.error(f"UniverseCache refresh failed: {e}")
 
     def _rebuild_canonical_map(self):
-        """Rebuilds the map used by Distributor for O(1) symbol normalization."""
+        """Rebuilds map used by Distributor for symbol normalization."""
         mapping = {}
-        # Iterate over keys directly (names are strings here)
         for name in self._instrument_map:
-            # Logic: "BTC-USDT" -> "BTCUSDT"
+            # Normalization: "BTC-USDT" -> "BTCUSDT"
+            # Used by StreamProcessor to match API streams to internal keys
             raw = name.replace("-", "").replace("_", "").upper()
             mapping[raw] = name
         self._raw_to_canonical_map = mapping
 
     async def get_storage_mode(self, instrument_name: str) -> StorageMode:
         """
-        Determines storage mode for an asset.
-        Priority: Override (Spotlight) > Standard Config
+        Determines storage mode. 
+        Priority: Override (Spotlight) > Standard Config > Ephemeral Default
         """
-        # 1. Check Spotlight (Dynamic Promotion)
+        # 1. Check Spotlight
         if instrument_name in self._overrides:
-            # If the key exists in the override map, it is strictly PERSISTENT
             return StorageMode.PERSISTENT
             
-        # 2. Check Standard Config (Base Layer)
+        # 2. Check Base Config
         instrument_data = self._instrument_map.get(instrument_name)
         if instrument_data:
-            # Default to EPHEMERAL if not specified
             return StorageMode(instrument_data.get("storage_mode", StorageMode.EPHEMERAL.value))
             
         return StorageMode.EPHEMERAL
 
     def get_all_instruments(self) -> List[Dict]:
         """
-        Returns flat list of instruments.
-        Injected logic ensures 'storage_mode' reflects the override.
-        Used by Analyzer to know what to analyze.
+        Returns flat list for Analyzer loops.
+        Merges Base Config with Spotlight Overrides.
         """
         results = []
         for name, data in self._instrument_map.items():
-            # Create a lightweight copy to avoid mutating the cache
+            # Lightweight copy
             item = data.copy()
             
-            # Apply Spotlight Logic
+            # [CRITICAL] Apply Spotlight Logic
+            # If asset is in overrides, force it to PERSISTENT
             if name in self._overrides:
                 item["storage_mode"] = StorageMode.PERSISTENT.value
                 
             results.append(item)
+            
         return results
 
     @property
     def _raw_to_canonical(self) -> Dict[str, str]:
-        """
-        Accessor for the Distributor's normalization map.
-        """
+        """Accessor for Distributor stream_processor."""
         return self._raw_to_canonical_map
