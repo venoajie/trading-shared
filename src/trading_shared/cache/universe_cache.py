@@ -1,21 +1,20 @@
 # src/trading_shared/trading_shared/cache/universe_cache.py
 
+from typing import Dict, Optional, List, Any
 import orjson
 from loguru import logger as log
-
 from trading_shared.clients.redis_client import CustomRedisClient
 from trading_shared.core.enums import StorageMode
-
 
 class UniverseCache:
     """
     A unified, multi-layered cache for the active trading universe.
-
+    
     Layers:
     1. Base Layer: The static universe definition (from Janitor/Config).
     2. Spotlight Layer: Dynamic overrides (promotions) from Strategist.
-
-    This ensures that when an asset is promoted to PERSISTENT, all consumers
+    
+    This ensures that when an asset is promoted to PERSISTENT, all consumers 
     (Distributor, Analyzer) immediately respect the new storage mode.
     """
 
@@ -24,12 +23,12 @@ class UniverseCache:
         self.universe_key = universe_key
         # [NEW] The "Spotlight" Key defined in DATA_CONTRACTS.md
         self.override_key = "system:map:strategist:overrides"
-
+        
         # Local Memory Caches
-        self._instrument_map: dict[str, dict] = {}
-        self._overrides: dict[str, str] = {}
+        self._instrument_map: Dict[str, Dict] = {} 
+        self._overrides: Dict[str, str] = {}
         # Pre-computed map for Distributor's fast lookup
-        self._raw_to_canonical_map: dict[str, str] = {}
+        self._raw_to_canonical_map: Dict[str, str] = {}
 
     async def refresh(self):
         """
@@ -39,26 +38,42 @@ class UniverseCache:
             # 1. Load Standard Universe (The "Base" Layer)
             data = await self._redis.get(self.universe_key)
             if data:
-                self._instrument_map = orjson.loads(data)
-
+                raw_universe = orjson.loads(data)
+                
+                # [FIX] Resilient Parsing: Handle both List and Dict formats from Janitor
+                if isinstance(raw_universe, list):
+                    # Convert List -> Dict keyed by instrument_name
+                    self._instrument_map = {}
+                    for item in raw_universe:
+                        # Fallback to 'symbol' if 'instrument_name' is missing
+                        key = item.get("instrument_name") or item.get("symbol")
+                        if key:
+                            self._instrument_map[key] = item
+                elif isinstance(raw_universe, dict):
+                    self._instrument_map = raw_universe
+                else:
+                    log.error(f"Universe data is of unexpected type: {type(raw_universe)}")
+                    # Do not clear existing cache on malformed update
+            
             # 2. Load Overrides (The "Spotlight" Layer)
-            # We fetch all currently active promotions
             overrides_data = await self._redis.hgetall(self.override_key)
             if overrides_data:
-                self._overrides = {k.decode(): v.decode() for k, v in overrides_data.items()}
+                self._overrides = {
+                    k.decode(): v.decode() for k, v in overrides_data.items()
+                }
             else:
                 self._overrides = {}
-
+            
             # 3. Rebuild the optimized map
             self._rebuild_canonical_map()
-
+            
         except Exception as e:
             log.error(f"UniverseCache refresh failed: {e}")
 
     def _rebuild_canonical_map(self):
         """Rebuilds the map used by Distributor for O(1) symbol normalization."""
         mapping = {}
-        # [FIX] Iterate over keys directly to resolve B007 linter error.
+        # Iterate over keys directly (names are strings here)
         for name in self._instrument_map:
             # Logic: "BTC-USDT" -> "BTCUSDT"
             raw = name.replace("-", "").replace("_", "").upper()
@@ -74,16 +89,16 @@ class UniverseCache:
         if instrument_name in self._overrides:
             # If the key exists in the override map, it is strictly PERSISTENT
             return StorageMode.PERSISTENT
-
+            
         # 2. Check Standard Config (Base Layer)
         instrument_data = self._instrument_map.get(instrument_name)
         if instrument_data:
             # Default to EPHEMERAL if not specified
             return StorageMode(instrument_data.get("storage_mode", StorageMode.EPHEMERAL.value))
-
+            
         return StorageMode.EPHEMERAL
 
-    def get_all_instruments(self) -> list[dict]:
+    def get_all_instruments(self) -> List[Dict]:
         """
         Returns flat list of instruments.
         Injected logic ensures 'storage_mode' reflects the override.
@@ -93,16 +108,16 @@ class UniverseCache:
         for name, data in self._instrument_map.items():
             # Create a lightweight copy to avoid mutating the cache
             item = data.copy()
-
+            
             # Apply Spotlight Logic
             if name in self._overrides:
                 item["storage_mode"] = StorageMode.PERSISTENT.value
-
+                
             results.append(item)
         return results
 
     @property
-    def _raw_to_canonical(self) -> dict[str, str]:
+    def _raw_to_canonical(self) -> Dict[str, str]:
         """
         Accessor for the Distributor's normalization map.
         """
