@@ -1,4 +1,4 @@
-# src\trading_shared\config\models.py
+# src/trading_shared/config/models.py
 
 # --- Built Ins  ---
 from urllib.parse import quote_plus
@@ -47,12 +47,10 @@ class PostgresSettings(BaseModel):
         encoded_user = quote_plus(self.user)
         encoded_password = quote_plus(self.password.get_secret_value())
         return f"postgresql://{encoded_user}:{encoded_password}@{self.host}:{self.port}/{self.db}"
-        # return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.db}"
 
 
 class ExchangeSettings(BaseModel):
-    # API keys are now optional, allowing this model to be used
-    # for both public and private clients.
+    """Generic settings for authenticated exchange clients."""
     client_id: str | None = None
     client_secret: SecretStr | None = None
 
@@ -65,3 +63,21 @@ class ExchangeSettings(BaseModel):
 class TelegramSettings(BaseModel):
     bot_token: SecretStr
     chat_id: str
+
+
+# --- Public Exchange Settings (Used by Backfill/Janitor) ---
+
+class BinancePublicSettings(BaseModel):
+    """Configuration for Binance Public Data Client."""
+    rest_url: str = Field(default="https://api.binance.com")
+    ws_url: str = Field(default="wss://stream.binance.com:9443/ws")
+    request_timeout: int = Field(default=10, description="HTTP request timeout in seconds.")
+    max_retries: int = Field(default=3, description="Max retries for failed requests.")
+
+
+class DeribitPublicSettings(BaseModel):
+    """Configuration for Deribit Public Data Client."""
+    rest_url: str = Field(default="https://www.deribit.com")
+    ws_url: str = Field(default="wss://www.deribit.com/ws/api/v2")
+    request_timeout: int = Field(default=10, description="HTTP request timeout in seconds.")
+    max_retries: int = Field(default=3, description="Max retries for failed requests.")
