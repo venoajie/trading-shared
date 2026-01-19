@@ -3,9 +3,9 @@
 import json
 
 from trading_shared.cache.universe_cache import UniverseCache
-from trading_shared.core.models import StorageMode
 from trading_shared.clients.postgres_client import PostgresClient
 from trading_shared.clients.redis_client import CustomRedisClient
+from trading_shared.core.models import StorageMode
 
 
 class HybridMarketDataRepository:

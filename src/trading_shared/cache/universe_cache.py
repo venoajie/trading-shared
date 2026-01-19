@@ -83,6 +83,6 @@ class UniverseCache:
             # Diagnostic log to verify mapping
             sample_keys = list(new_canonical.keys())[:5]
             log.debug(f"UniverseCache Sample Keys: {sample_keys}")
-            
+
         except Exception as e:
             log.exception(f"UniverseCache refresh failed: {e}")
