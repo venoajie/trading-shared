@@ -1,3 +1,4 @@
+
 # src/trading_shared/trading_shared/cache/universe_cache.py
 
 from typing import Dict, Optional, List, Any
@@ -6,9 +7,6 @@ from loguru import logger as log
 from trading_shared.clients.redis_client import CustomRedisClient
 from trading_shared.core.enums import StorageMode
 
-# [DIAGNOSTIC]
-TARGET_DEBUG_RAW = "BTCUSDT"
-
 class UniverseCache:
     """
     A unified, multi-layered cache for the active trading universe.
@@ -16,11 +14,6 @@ class UniverseCache:
     Layers:
     1. Base Layer: The static universe definition (from Janitor/Config).
     2. Spotlight Layer: Dynamic overrides (promotions) from Strategist.
-    
-    Reliability:
-    - Handles List vs Dict input formats robustly.
-    - Merges Spotlight overrides dynamically.
-    - Thread-safe atomic updates.
     """
 
     def __init__(self, redis_client: CustomRedisClient, universe_key: str):
@@ -74,20 +67,11 @@ class UniverseCache:
     def _rebuild_canonical_map(self):
         """Rebuilds map used by Distributor for symbol normalization."""
         mapping = {}
-        target_found = False
-        
         for name in self._instrument_map:
             # Normalization: "BTC-USDT" -> "BTCUSDT"
             # Used by StreamProcessor to match API streams to internal keys
             raw = name.replace("-", "").replace("_", "").upper()
             mapping[raw] = name
-            
-            if raw == TARGET_DEBUG_RAW:
-                target_found = True
-        
-        if not target_found:
-            log.warning(f"⚠️ CACHE: {TARGET_DEBUG_RAW} NOT FOUND in refreshed universe map. Total instruments: {len(mapping)}")
-        
         self._raw_to_canonical_map = mapping
 
     async def get_storage_mode(self, instrument_name: str) -> StorageMode:
