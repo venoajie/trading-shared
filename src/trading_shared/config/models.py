@@ -51,6 +51,7 @@ class PostgresSettings(BaseModel):
 
 class ExchangeSettings(BaseModel):
     """Generic settings for authenticated exchange clients."""
+
     client_id: str | None = None
     client_secret: SecretStr | None = None
 
@@ -67,8 +68,10 @@ class TelegramSettings(BaseModel):
 
 # --- Public Exchange Settings (Used by Backfill/Janitor) ---
 
+
 class BinancePublicSettings(BaseModel):
     """Configuration for Binance Public Data Client."""
+
     rest_url: str = Field(default="https://api.binance.com")
     ws_url: str = Field(default="wss://stream.binance.com:9443/ws")
     request_timeout: int = Field(default=10, description="HTTP request timeout in seconds.")
@@ -77,6 +80,7 @@ class BinancePublicSettings(BaseModel):
 
 class DeribitPublicSettings(BaseModel):
     """Configuration for Deribit Public Data Client."""
+
     rest_url: str = Field(default="https://www.deribit.com")
     ws_url: str = Field(default="wss://www.deribit.com/ws/api/v2")
     request_timeout: int = Field(default=10, description="HTTP request timeout in seconds.")

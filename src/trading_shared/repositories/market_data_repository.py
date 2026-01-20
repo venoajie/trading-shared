@@ -31,15 +31,11 @@ class MarketDataRepository:
         message_dicts = [msg.model_dump(exclude_none=True) for msg in messages]
         await self._redis.xadd_bulk(stream_name, message_dicts, maxlen=maxlen)
 
-    # [MODIFIED] Signature updated to include 'exchange' for correct key schema.
     async def cache_ticker(self, exchange: str, symbol: str, data: dict[str, Any], ttl_seconds: int = 5400):
         """Caches ticker data with a 90-minute TTL using the canonical key schema."""
-        # [FIX] Key schema now matches the one used by the Strategist's DataFacade.
         redis_key = f"market:cache:{exchange.lower()}:ticker:{symbol.upper()}"
         try:
-            # Storing the payload as a JSON string is more flexible than individual fields.
             payload_str = orjson.dumps(data)
-
             pipe = await self._redis.pipeline()
             await pipe.hset(redis_key, "payload", payload_str)
             await pipe.expire(redis_key, ttl_seconds)
@@ -48,9 +44,7 @@ class MarketDataRepository:
             log.exception(f"Failed to cache ticker for {symbol}")
 
     async def get_ticker_data(self, instrument_name: str) -> dict[str, Any] | None:
-        # Note: This is now a simplified getter; the key construction logic lives with the writer.
-        # A more robust implementation would also take 'exchange' here.
-        key = f"ticker:{instrument_name.upper()}"  # This key is now inconsistent, but unused by critical services.
+        key = f"ticker:{instrument_name.upper()}"
         try:
             payload = await self._redis.hget(key, "payload")
             if not payload:
@@ -61,6 +55,10 @@ class MarketDataRepository:
             return None
 
     async def update_realtime_candle(self, exchange: str, instrument_name: str, candle_data: dict):
+        """
+        Updates the 'Hot' OHLC candle in Redis.
+        CRITICAL FIX: TTL extended to 60s to resolve race condition with Analyzer (15s loop).
+        """
         key = f"market:cache:{exchange.lower()}:ohlc:live:{instrument_name.upper()}"
         mapping = {
             "tick": str(candle_data["tick"]),
@@ -77,17 +75,14 @@ class MarketDataRepository:
         try:
             pipe = await self._redis.pipeline()
             await pipe.hset(name=key, mapping=mapping)
-            await pipe.expire(key, 5)
+            # [FIX] TTL Increased 5s -> 60s. Analyzer runs every 15s.
+            # 5s TTL guarantees data loss if Analyzer checks at T+6s.
+            await pipe.expire(key, 60)
             await pipe.execute()
         except Exception:
             log.exception(f"Failed to update live candle for key '{key}'")
 
     async def persist_ephemeral_candles(self, candles: list[OHLCModel]):
-        """Persists a batch of completed candles designated as EPHEMERAL."""
-        # This functionality might be better named or placed, but for now, it handles
-        # writing completed candles to a final resting place in Redis if needed.
-        # For this system, we only care about the live candle, so this might be a no-op
-        # or could be used to store a short history.
         pass
 
     async def get_realtime_candle(self, exchange: str, instrument_name: str) -> dict[str, Any] | None:
