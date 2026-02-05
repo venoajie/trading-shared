@@ -2,7 +2,7 @@
 
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, List
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -67,33 +67,21 @@ class MarketDefinition(AppBaseModel):
 
 
 class OHLCModel(AppBaseModel):
-    """
-    Standard Open-High-Low-Close candle data.
-    Updated for Project Microstructure Alpha to include granular volume data.
-    """
-
+    """Standard Open-High-Low-Close candle data."""
     exchange: str | None = None
     instrument_name: str | None = None
     resolution: str | None = None
-
     tick: int = Field(..., description="Unix timestamp in milliseconds.")
     open: float
     high: float
     low: float
     close: float
-    volume: float = Field(..., description="Total volume (taker_buy + taker_sell).")
-
-    # [FIX] Added quote_volume and trade_count to match Aggregator v2.0 logic
-    quote_volume: float = Field(default=0.0, description="Volume in quote currency (Price * Quantity).")
-    trade_count: int = Field(default=0, description="Number of individual trades aggregated in this candle.")
-
-    # --- Microstructure Metrics ---
-    taker_buy_volume: float = Field(default=0.0, description="Volume where buyer was taker (Aggressive Buy).")
-    taker_sell_volume: float = Field(default=0.0, description="Volume where seller was taker (Aggressive Sell).")
-
-    # Disallow None for numeric fields. Provide a concrete default.
-    # This prevents serialization and casting errors in all downstream services.
-    open_interest: float = Field(default=0.0)
+    volume: float
+    quote_volume: float = 0.0
+    trade_count: int = 0
+    taker_buy_volume: float = 0.0
+    taker_sell_volume: float = 0.0
+    open_interest: float = 0.0
 
 
 class StreamMessage(AppBaseModel):
@@ -247,36 +235,26 @@ class SystemAlert(AppBaseModel):
 
 
 class TakerMetrics(BaseModel):
-    """
-    Real-time microstructure metrics calculated by the Analyzer.
-    """
-
     """Real-time microstructure metrics."""
     symbol: str
     timestamp: float
-    tbsr_5m: float = Field(default=1.0, description="Taker Buy/Sell Ratio (5 min)")
-    net_delta_1m: float = Field(default=0.0, description="Taker Buy Vol - Taker Sell Vol")
+    tbsr_5m: float = Field(default=1.0)
+    net_delta_1m: float = Field(default=0.0)
     taker_buy_vol_5m: float = 0.0
     taker_sell_vol_5m: float = 0.0
     aggression_score: float = 50.0
 
 
+
 class MarketContext(BaseModel):
     """The 6-Layer Context Grid."""
-
-    # 1. Regime
     regime: str = "NEUTRAL"
-    # 2. Liquidity
     liquidity_tier: str = "TIER_2"
-    # 3. Temporal (Chronos)
     session_name: str = "UNKNOWN"
     is_weekend: bool = False
     is_low_liquidity_hour: bool = False
-    # 4. Phase
     pump_phase: str = "UNKNOWN"
-    # 5. Whale
     whale_activity: str = "UNKNOWN"
-    # 6. Sentiment
     sentiment_score: float = 0.5
 
 
@@ -285,22 +263,37 @@ class SignalEvent(BaseModel):
     strategy_name: str
     symbol: str
     exchange: str
-    signal_type: str  # "LONG", "SHORT", "ALERT"
-    strength: float  # 0.0 to 1.0 (RVOL / Max_RVOL)
-    metadata: dict[str, Any]  # {"rvol": 5.2, "delta": 0.4, "venues": [...]}
+    signal_type: str
+    strength: float
+    metadata: dict[str, Any]
 
+class CorrelationMatrix(BaseModel):
+    """Statistical relationship snapshot."""
+    reference_symbol: str = "BTC"
+    correlation_1h: float = 0.0
+    correlation_24h: float = 0.0
+    beta: float = 1.0
 
 class EnhancedSignalEvent(BaseModel):
-    """Signal Event enriched with Context."""
-
+    """
+    Signal Event enriched with Context, Metrics, and Visual Data.
+    Acts as the 'Heavy' payload for Decision and Notification services.
+    """
     timestamp: float
     strategy_name: str
     symbol: str
     exchange: str
     signal_type: str
-    strength: float  # 0.0 to 1.0
+    strength: float
 
     # Enriched Payload
     metrics: TakerMetrics | None = None
     context: MarketContext | None = None
+    
+    # [NEW] Statistical Context
+    correlation: CorrelationMatrix | None = None
+    
+    # [NEW] Visual Context (Snapshot of recent price action)
+    candles: List[OHLCModel] = Field(default_factory=list)
+    
     metadata: dict[str, Any] = Field(default_factory=dict)
