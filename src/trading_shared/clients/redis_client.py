@@ -34,9 +34,9 @@ class CustomRedisClient:
         self._lock = asyncio.Lock()
         self._pubsub_max_connections = self._settings.pubsub_max_connections
         self._pubsub_pool = asyncio.Queue(maxsize=self._pubsub_max_connections)
-        self._pubsub_connections = []  # For cleanup on close
+        self._pubsub_connections = []
         self._pubsub_lock = asyncio.Lock()
-        self._pubsub_last_used = {}  # Track last use time for recycling
+        self._pubsub_last_used = {}
 
     async def connect(self):
         await self._get_client()
@@ -46,14 +46,9 @@ class CustomRedisClient:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Ensures the connection pool is closed on exit."""
         await self.close()
 
     async def _get_client(self) -> aioredis.Redis:
-        """
-        Returns a single, managed Redis client instance.
-        Implements a circuit breaker to prevent hammering a down server.
-        """
         async with self._lock:
             if self._client:
                 return self._client
@@ -73,7 +68,7 @@ class CustomRedisClient:
                     password=password_value,
                     db=int(self._settings.db or 0),
                     socket_connect_timeout=self._settings.socket_connect_timeout,
-                    decode_responses=False,  # Must be false for orjson
+                    decode_responses=False,
                 )
                 await asyncio.wait_for(self._client.ping(), timeout=10)
                 self._reconnect_attempts = 0
@@ -88,7 +83,6 @@ class CustomRedisClient:
                 raise ConnectionError("Redis connection failed on initial attempt.") from e
 
     async def _safe_close_client(self):
-        """Safely closes the current client instance, ignoring errors."""
         client_to_close = self._client
         self._client = None
         if client_to_close:
@@ -107,22 +101,17 @@ class CustomRedisClient:
         func: Callable[[aioredis.Redis], Awaitable[T]],
         command_name_for_logging: str,
     ) -> T:
-        """
-        Executes a given Redis command function with a resilient retry mechanism.
-        """
-        last_exception: Exception | None = None
         max_retries = self._settings.max_retries
         initial_delay = self._settings.initial_retry_delay_s
+        last_exception = None
 
         for attempt in range(max_retries):
             try:
                 client = await self._get_client()
-                # Check if pool is None before using it
                 if client is None:
                     raise ConnectionError("Redis pool is None - connection not established")
                 return await func(client)
             except AttributeError as e:
-                # Catch AttributeError when pool methods fail
                 log.warning(f"Redis command '{command_name_for_logging}' failed due to AttributeError (attempt {attempt + 1}/{max_retries}): {e}")
                 last_exception = e
                 await self._safe_close_client()
@@ -132,7 +121,7 @@ class CustomRedisClient:
                 redis_exceptions.ConnectionError,
                 redis_exceptions.TimeoutError,
                 TimeoutError,
-                ConnectionError,  # Catch our own ConnectionError
+                ConnectionError,
             ) as e:
                 log.warning(f"Redis command '{command_name_for_logging}' failed (attempt {attempt + 1}/{max_retries}): {e}")
                 last_exception = e
@@ -590,20 +579,6 @@ class CustomRedisClient:
 
         await self.execute_resiliently(command, f"EXPIRE {name}")
 
-    async def xadd(
-        self,
-        name: str,
-        fields: dict,
-        maxlen: int | None = None,
-        approximate: bool = True,
-    ):
-        encoded_fields = {k.encode("utf-8") if isinstance(k, str) else k: v.encode("utf-8") if isinstance(v, str) else v for k, v in fields.items()}
-
-        async def command(conn: aioredis.Redis):
-            await conn.xadd(name, encoded_fields, maxlen=maxlen, approximate=approximate)
-
-        await self.execute_resiliently(command, f"XADD {name}")
-
     async def lpush(self, key: str, value: str | bytes):
         return await self.execute_resiliently(lambda pool: pool.lpush(key, value), f"LPUSH {key}")
 
@@ -694,3 +669,76 @@ class CustomRedisClient:
 
     async def smembers(self, key: str) -> set:
         return await self.execute_resiliently(lambda client: client.smembers(key), f"SMEMBERS {key}")
+
+    async def zadd(self, key: str, mapping: dict[str | bytes, float], nx: bool = False, xx: bool = False):
+        """Adds all specified members with the specified scores to the sorted set stored at key."""
+
+        async def command(conn: aioredis.Redis):
+            return await conn.zadd(key, mapping, nx=nx, xx=xx)
+
+        return await self.execute_resiliently(command, f"ZADD {key}")
+
+    async def zrange(self, key: str, start: int, end: int, withscores: bool = False) -> list | list[tuple]:
+        """Returns the specified range of elements in the sorted set stored at key."""
+
+        async def command(conn: aioredis.Redis):
+            return await conn.zrange(key, start, end, withscores=withscores)
+
+        return await self.execute_resiliently(command, f"ZRANGE {key}")
+
+    async def zrevrange(self, key: str, start: int, end: int, withscores: bool = False) -> list | list[tuple]:
+        """Returns the specified range of elements in the sorted set stored at key, from highest to lowest score."""
+
+        async def command(conn: aioredis.Redis):
+            return await conn.zrevrange(key, start, end, withscores=withscores)
+
+        return await self.execute_resiliently(command, f"ZREVRANGE {key}")
+
+    async def zremrangebyscore(self, key: str, min_score: float | str, max_score: float | str):
+        """Removes all elements in the sorted set stored at key with a score between min and max."""
+
+        async def command(conn: aioredis.Redis):
+            return await conn.zremrangebyscore(key, min_score, max_score)
+
+        return await self.execute_resiliently(command, f"ZREMRANGEBYSCORE {key}")
+
+    async def zcard(self, key: str) -> int:
+        """Returns the sorted set cardinality (number of elements) of the sorted set stored at key."""
+
+        async def command(conn: aioredis.Redis):
+            return await conn.zcard(key)
+
+        return await self.execute_resiliently(command, f"ZCARD {key}")
+
+    async def xadd(
+        self,
+        name: str,
+        fields: dict,
+        maxlen: int | None = None,
+        approximate: bool = True,
+    ):
+        """
+        Adds a message to a stream with automatic JSON serialization for complex types.
+        """
+
+        async def command(conn: aioredis.Redis):
+            encoded_fields = {}
+            for k, v in fields.items():
+                # Encode Key
+                key_bytes = k.encode("utf-8") if isinstance(k, str) else k
+
+                # Encode Value
+                if isinstance(v, (dict, list, tuple)):
+                    # Serialize complex structures to JSON bytes
+                    val_bytes = orjson.dumps(v)
+                elif isinstance(v, str):
+                    val_bytes = v.encode("utf-8")
+                else:
+                    # Safely convert numbers/bools to strings then bytes
+                    val_bytes = str(v).encode("utf-8")
+
+                encoded_fields[key_bytes] = val_bytes
+
+            await conn.xadd(name, encoded_fields, maxlen=maxlen, approximate=approximate)
+
+        await self.execute_resiliently(command, f"XADD {name}")

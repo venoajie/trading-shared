@@ -2,7 +2,7 @@
 
 
 from datetime import datetime
-from typing import Any, Literal, List
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -68,6 +68,7 @@ class MarketDefinition(AppBaseModel):
 
 class OHLCModel(AppBaseModel):
     """Standard Open-High-Low-Close candle data."""
+
     exchange: str | None = None
     instrument_name: str | None = None
     resolution: str | None = None
@@ -236,6 +237,7 @@ class SystemAlert(AppBaseModel):
 
 class TakerMetrics(BaseModel):
     """Real-time microstructure metrics."""
+
     symbol: str
     timestamp: float
     tbsr_5m: float = Field(default=1.0)
@@ -245,9 +247,9 @@ class TakerMetrics(BaseModel):
     aggression_score: float = 50.0
 
 
-
 class MarketContext(BaseModel):
     """The 6-Layer Context Grid."""
+
     regime: str = "NEUTRAL"
     liquidity_tier: str = "TIER_2"
     session_name: str = "UNKNOWN"
@@ -267,18 +269,22 @@ class SignalEvent(BaseModel):
     strength: float
     metadata: dict[str, Any]
 
+
 class CorrelationMatrix(BaseModel):
     """Statistical relationship snapshot."""
+
     reference_symbol: str = "BTC"
     correlation_1h: float = 0.0
     correlation_24h: float = 0.0
     beta: float = 1.0
+
 
 class EnhancedSignalEvent(BaseModel):
     """
     Signal Event enriched with Context, Metrics, and Visual Data.
     Acts as the 'Heavy' payload for Decision and Notification services.
     """
+
     timestamp: float
     strategy_name: str
     symbol: str
@@ -289,11 +295,11 @@ class EnhancedSignalEvent(BaseModel):
     # Enriched Payload
     metrics: TakerMetrics | None = None
     context: MarketContext | None = None
-    
+
     # [NEW] Statistical Context
     correlation: CorrelationMatrix | None = None
-    
+
     # [NEW] Visual Context (Snapshot of recent price action)
-    candles: List[OHLCModel] = Field(default_factory=list)
-    
+    candles: list[OHLCModel] = Field(default_factory=list)
+
     metadata: dict[str, Any] = Field(default_factory=dict)

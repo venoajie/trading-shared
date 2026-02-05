@@ -3,7 +3,7 @@
 import asyncio
 import re
 import time
-from typing import Self, Optional
+from typing import Self
 
 import aiohttp
 from loguru import logger as log
@@ -11,6 +11,7 @@ from loguru import logger as log
 
 class TelegramDeliveryError(Exception):
     """Custom exception for failures after all retries."""
+
     pass
 
 
@@ -91,10 +92,10 @@ class TelegramClient:
         for attempt in range(1, max_retries + 1):
             try:
                 await self._enforce_client_rate_limit()
-                
+
                 # Choose request method
                 req_func = self._session.get if method == "GET" else self._session.post
-                
+
                 async with req_func(api_url, timeout=20, **kwargs) as response:
                     if response.status == 429:
                         retry_after = 5
@@ -166,13 +167,8 @@ class TelegramClient:
         if formatted_caption:
             data.add_field("caption", formatted_caption)
             data.add_field("parse_mode", "MarkdownV2")
-        
+
         # Add the file stream
-        data.add_field(
-            "photo",
-            photo_data,
-            filename="chart.png",
-            content_type="image/png"
-        )
+        data.add_field("photo", photo_data, filename="chart.png", content_type="image/png")
 
         await self._make_request("POST", "sendPhoto", data=data)
