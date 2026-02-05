@@ -3,7 +3,7 @@
 import asyncio
 import re
 import time
-from typing import Self
+from typing import Self, Optional
 
 import aiohttp
 from loguru import logger as log
@@ -11,7 +11,6 @@ from loguru import logger as log
 
 class TelegramDeliveryError(Exception):
     """Custom exception for failures after all retries."""
-
     pass
 
 
@@ -60,7 +59,6 @@ class TelegramClient:
                     log.success(f"Telegram token valid. Connected to bot: @{username}")
                     return
 
-                # [FIX] The 'in' operator requires a collection to check against.
                 if response.status in [401, 404]:
                     raise ConnectionRefusedError("Telegram Bot Token is invalid or revoked.")
 
@@ -85,32 +83,19 @@ class TelegramClient:
         escape_chars = r"_*[]()~`>#+-=|{}.!"
         return re.sub(f"([{re.escape(escape_chars)}])", r"\\\1", text)
 
-    async def send_message(self, text: str, use_code_block: bool = True):
-        if not self.is_enabled:
-            return
-
-        await self._enforce_client_rate_limit()
-
-        api_url = f"https://api.telegram.org/bot{self._token}/sendMessage"
-
-        final_text = text
-        if use_code_block:
-            # For code blocks, no escaping is needed, but we still construct it properly.
-            # The previous implementation incorrectly mixed escaping with code blocks.
-            final_text = f"```\n{text}\n```"
-        else:
-            final_text = self._escape_markdown_v2(text)
-
-        payload = {
-            "chat_id": self._chat_id,
-            "text": final_text,
-            "parse_mode": "MarkdownV2",
-        }
-
+    async def _make_request(self, method: str, endpoint: str, **kwargs):
+        """Internal helper to handle retries and rate limits."""
+        api_url = f"https://api.telegram.org/bot{self._token}/{endpoint}"
         max_retries = 3
+
         for attempt in range(1, max_retries + 1):
             try:
-                async with self._session.post(api_url, json=payload, timeout=10) as response:
+                await self._enforce_client_rate_limit()
+                
+                # Choose request method
+                req_func = self._session.get if method == "GET" else self._session.post
+                
+                async with req_func(api_url, timeout=20, **kwargs) as response:
                     if response.status == 429:
                         retry_after = 5
                         try:
@@ -125,12 +110,12 @@ class TelegramClient:
                         continue
 
                     if response.status == 200:
-                        log.debug("Telegram message sent successfully.")
+                        log.debug(f"Telegram {endpoint} successful.")
                         return
 
                     if response.status == 400:
                         error_details = await response.text()
-                        log.error(f"Telegram 400 Bad Request: {error_details}. Payload: {payload}")
+                        log.error(f"Telegram 400 Bad Request: {error_details}")
 
                     response.raise_for_status()
 
@@ -141,3 +126,53 @@ class TelegramClient:
                 else:
                     log.error("Max retries reached for Telegram. Message dropped.")
                     raise TelegramDeliveryError(f"Failed to send after {max_retries} attempts.") from e
+
+    async def send_message(self, text: str, use_code_block: bool = True):
+        """Sends a text-only message."""
+        if not self.is_enabled:
+            return
+
+        final_text = text
+        if use_code_block:
+            final_text = f"```\n{text}\n```"
+        else:
+            final_text = self._escape_markdown_v2(text)
+
+        payload = {
+            "chat_id": self._chat_id,
+            "text": final_text,
+            "parse_mode": "MarkdownV2",
+        }
+        await self._make_request("POST", "sendMessage", json=payload)
+
+    async def send_photo(self, photo_data: bytes, caption: str = "", use_code_block: bool = True):
+        """
+        Sends a photo with an optional caption.
+        Uses multipart/form-data for image upload.
+        """
+        if not self.is_enabled:
+            return
+
+        formatted_caption = caption
+        if caption:
+            if use_code_block:
+                formatted_caption = f"```\n{caption}\n```"
+            else:
+                formatted_caption = self._escape_markdown_v2(caption)
+
+        # Construct Multipart Writer
+        data = aiohttp.FormData()
+        data.add_field("chat_id", self._chat_id)
+        if formatted_caption:
+            data.add_field("caption", formatted_caption)
+            data.add_field("parse_mode", "MarkdownV2")
+        
+        # Add the file stream
+        data.add_field(
+            "photo",
+            photo_data,
+            filename="chart.png",
+            content_type="image/png"
+        )
+
+        await self._make_request("POST", "sendPhoto", data=data)
