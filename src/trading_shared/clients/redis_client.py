@@ -287,22 +287,35 @@ class CustomRedisClient:
         self,
         stream_name: str,
         group_name: str,
+        start_id: str = "0",  # [MODIFIED] Added start_id parameter
     ):
+        """
+        Ensures a consumer group exists.
+        If start_id is '$', and the group already exists, it will force the
+        group pointer to the end of the stream (skipping backlog).
+        """
         try:
             await self.execute_resiliently(
                 lambda pool: pool.xgroup_create(
                     stream_name,
                     group_name,
-                    id="0",
+                    id=start_id,
                     mkstream=True,
                 ),
-                "xgroup_create",
+                f"xgroup_create starting at {start_id}",
             )
-            log.info(f"Created consumer group '{group_name}' for stream '{stream_name}'.")
+            log.info(f"Created consumer group '{group_name}' for stream '{stream_name}' starting at {start_id}.")
         except redis_exceptions.ResponseError as e:
-            if "BUSYGROUP" in str(e):
-                log.debug(f"Consumer group '{group_name}' already exists.")
+            err_msg = str(e)
+            if "BUSYGROUP" in err_msg:
+                # [NEW] Logic to reset pointer to tail if live-only processing is requested
+                if start_id == "$":
+                    await self.execute_resiliently(lambda pool: pool.xgroup_setid(stream_name, group_name, id="$"), "xgroup_setid to $")
+                    log.info(f"Reset consumer group '{group_name}' pointer to tail ($) to skip backlog.")
+                else:
+                    log.debug(f"Consumer group '{group_name}' already exists.")
             else:
+                log.error(f"Failed to ensure consumer group: {err_msg}")
                 raise
 
     async def read_stream_messages(
