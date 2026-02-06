@@ -557,6 +557,7 @@ class CustomRedisClient:
                 await conn.hset(name, mapping=mapping)
 
             await self.execute_resiliently(command, f"HSET {name} [MAPPING]")
+
         elif key is not None:
 
             async def command(conn: aioredis.Redis):
@@ -614,9 +615,19 @@ class CustomRedisClient:
         """Sets a key with an expiration time (in seconds)."""
         return await self.execute_resiliently(lambda pool: pool.setex(key, ttl, value), f"SETEX {key}")
 
-    async def exists(self, key: str) -> int:
-        """Checks if a key exists. Returns 1 if exists, 0 otherwise."""
-        return await self.execute_resiliently(lambda pool: pool.exists(key), f"EXISTS {key}")
+    async def exists(self, key: str) -> bool:
+        """
+        Checks if a key exists in Redis.
+        Returns True if the key exists, False otherwise.
+        """
+
+        async def command(conn: aioredis.Redis) -> bool:
+            # The 'exists' command in redis-py returns an integer (0 or 1)
+            result = await conn.exists(key)
+            return result > 0
+
+        # This command is read-only, no semaphore needed.
+        return await self.execute_resiliently(command, f"EXISTS {key}")
 
     async def llen(self, key: str) -> int:
         """Returns the length of a list in Redis."""
