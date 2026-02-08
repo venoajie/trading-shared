@@ -2,7 +2,7 @@
 
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -296,10 +296,14 @@ class EnhancedSignalEvent(BaseModel):
     metrics: TakerMetrics | None = None
     context: MarketContext | None = None
 
-    # [NEW] Statistical Context
+    # Statistical Context
     correlation: CorrelationMatrix | None = None
 
-    # [NEW] Visual Context (Snapshot of recent price action)
+    # Visual Context (Snapshot of recent price action)
     candles: list[OHLCModel] = Field(default_factory=list)
 
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    # Benchmark candle data.
+    # It is optional because signals for BTC itself or system alerts won't have it.
+    benchmark_candles: Optional[List[OHLCModel]] = None
