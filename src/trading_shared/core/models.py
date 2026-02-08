@@ -277,7 +277,8 @@ class CorrelationMatrix(BaseModel):
     correlation_1h: float = 0.0
     correlation_24h: float = 0.0
     beta: float = 1.0
-
+    is_significant: bool = False
+    t_score: float = 0.0
 
 class EnhancedSignalEvent(BaseModel):
     """
