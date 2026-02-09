@@ -13,7 +13,7 @@ from .base import AbstractWsClient
 
 class BinanceMoversWsClient(AbstractWsClient):
     """
-    Dedicated client for 'abnormaltradingnotices'.
+    Dedicated client for Binance's 'abnormaltradingnotices' stream.
     Refactored to use the direct single-stream endpoint for robustness.
     """
 
@@ -25,7 +25,6 @@ class BinanceMoversWsClient(AbstractWsClient):
     ):
         super().__init__(market_definition, market_data_repo=None)
         self.system_state_repo = system_state_repo
-        # [MODIFIED] We now construct the full, direct URL here
         base_url = settings.ws_url.replace("wss://stream.", "wss://bstream.")
         self.ws_connection_url = f"{base_url}/ws/abnormaltradingnotices"
 
@@ -39,7 +38,6 @@ class BinanceMoversWsClient(AbstractWsClient):
         try:
             async with websockets.connect(self.ws_connection_url, ping_interval=180) as ws:
                 self._ws = ws
-
                 log.success(f"[{self.market_def.market_id}] Connected to Abnormal Trading Notices.")
                 async for message in ws:
                     yield message
@@ -60,18 +58,22 @@ class BinanceMoversWsClient(AbstractWsClient):
             try:
                 async for message in self.connect():
                     try:
-                        # For this stream, the raw message is the payload
                         payload = orjson.loads(message)
 
                         raw_sym = payload.get("symbol")
                         canonical_sym = await self._normalize_symbol(raw_sym)
 
                         if canonical_sym:
-                            pipe = self.system_state_repo.redis.pipeline()
+                            # [FIX] The 'await' keyword is added here.
+                            pipe = await self.system_state_repo.redis.pipeline()
+
+                            # Now 'pipe' is a valid Pipeline object.
                             pipe.hset(self.override_key, canonical_sym, orjson.dumps(payload))
 
                             ttl_key = f"system:state:mover_ttl:{canonical_sym}"
                             pipe.set(ttl_key, 1, ex=self.override_ttl_seconds)
+
+                            # This await executes the pipeline transaction.
                             await pipe.execute()
 
                             log.info(f"💡 MOVER PROMOTED: {canonical_sym} | Event: {payload.get('eventType')}")
@@ -89,6 +91,5 @@ class BinanceMoversWsClient(AbstractWsClient):
         if self._ws:
             await self._ws.close()
 
-    # Unused abstract methods stubs
     async def _get_channels_from_universe(self, universe: list) -> set:
         return set()
