@@ -1,8 +1,9 @@
 # src/trading_shared/trading_shared/cache/universe_cache.py
 
+from typing import Any
+
 import orjson
 from loguru import logger as log
-from typing import Dict, Any
 
 from trading_shared.clients.redis_client import CustomRedisClient
 from trading_shared.core.enums import StorageMode
@@ -24,9 +25,9 @@ class UniverseCache:
         self.override_key = "system:map:strategist:overrides"
 
         # Local Memory Caches
-        self._instrument_map: Dict[str, Dict] = {}
-        self._overrides: Dict[str, Any] = {}  # Now stores the parsed payload
-        self._raw_to_canonical_map: Dict[str, str] = {}
+        self._instrument_map: dict[str, dict] = {}
+        self._overrides: dict[str, Any] = {}  # Now stores the parsed payload
+        self._raw_to_canonical_map: dict[str, str] = {}
 
     async def refresh(self):
         """Refreshes standard universe and dynamic spotlight overrides."""

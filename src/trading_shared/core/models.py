@@ -2,7 +2,7 @@
 
 
 from datetime import datetime
-from typing import Any, Literal, List, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -308,4 +308,4 @@ class EnhancedSignalEvent(BaseModel):
 
     # Benchmark candle data.
     # It is optional because signals for BTC itself or system alerts won't have it.
-    benchmark_candles: Optional[List[OHLCModel]] = None
+    benchmark_candles: list[OHLCModel] | None = None

@@ -1,6 +1,7 @@
 # src/trading_shared/trading_shared/exchanges/websockets/binance_movers.py
 
 import asyncio
+
 import orjson
 import websockets
 from loguru import logger as log
