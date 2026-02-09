@@ -718,13 +718,31 @@ class CustomRedisClient:
 
         return await self.execute_resiliently(command, f"ZREVRANGE {key}")
 
-    async def zremrangebyscore(self, key: str, min_score: float | str, max_score: float | str):
+    async def zremrangebyscore(self, key: str, min_score: float, max_score: float):
         """Removes all elements in the sorted set stored at key with a score between min and max."""
 
         async def command(conn: aioredis.Redis):
             return await conn.zremrangebyscore(key, min_score, max_score)
 
         return await self.execute_resiliently(command, f"ZREMRANGEBYSCORE {key}")
+
+    # --- [NEW] Added missing ZSet commands for full functionality ---
+
+    async def zrangebyscore(self, key: str, min_score: float, max_score: float, withscores: bool = False) -> list | list[tuple]:
+        """Returns elements in a sorted set within a score range."""
+
+        async def command(conn: aioredis.Redis):
+            return await conn.zrangebyscore(key, min_score, max_score, withscores=withscores)
+
+        return await self.execute_resiliently(command, f"ZRANGEBYSCORE {key}")
+
+    async def zremrangebyrank(self, key: str, start: int, stop: int):
+        """Removes elements in a sorted set within a rank range."""
+
+        async def command(conn: aioredis.Redis):
+            return await conn.zremrangebyrank(key, start, stop)
+
+        return await self.execute_resiliently(command, f"ZREMRANGEBYRANK {key}")
 
     async def zcard(self, key: str) -> int:
         """Returns the sorted set cardinality (number of elements) of the sorted set stored at key."""

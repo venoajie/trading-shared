@@ -1,6 +1,7 @@
-# src\trading_shared\repositories\hybrid_market_data_repository.py
+# src/trading_shared/repositories/hybrid_market_data_repository.py
 
-import json
+import orjson  # Use the faster orjson library for consistency
+from loguru import logger as log
 
 from trading_shared.cache.universe_cache import UniverseCache
 from trading_shared.clients.postgres_client import PostgresClient
@@ -37,6 +38,7 @@ class HybridMarketDataRepository:
             return await self._fetch_from_redis(exchange, symbol, lookback_minutes)
 
     async def _fetch_from_postgres(self, exchange: str, symbol: str, limit: int) -> list[dict]:
+        """Fetches from PostgreSQL for assets with persistent storage."""
         query = """
         SELECT
             exchange, instrument_name, resolution,
@@ -47,22 +49,39 @@ class HybridMarketDataRepository:
         WHERE exchange = $1 AND instrument_name = $2 AND resolution = '1'
         ORDER BY tick DESC LIMIT $3
         """
-        records = await self._db.fetch(query, exchange, symbol, limit)
-        # Sort ASC for calculation (oldest first)
-        return [dict(r) for r in reversed(records)]
-
-    async def _fetch_from_redis(self, exchange: str, symbol: str, limit: int) -> list[dict]:
-        key = f"market:buffer:ohlc:{exchange.lower()}:{symbol.upper()}"
-        # LTRIM/LRANGE: 0 is oldest, -1 is newest.
-        # We want the last N items.
-        raw_candles = await self._redis.lrange(key, -limit, -1)
-        if not raw_candles:
+        try:
+            records = await self._db.fetch(query, exchange, symbol, limit)
+            # Sort ASC for calculation (oldest first)
+            return [dict(r) for r in reversed(records)]
+        except Exception as e:
+            log.warning(f"Postgres fetch failed for {symbol}: {e}")
             return []
 
-        parsed = []
-        for c in raw_candles:
-            try:
-                parsed.append(json.loads(c))
-            except json.JSONDecodeError:
-                continue
-        return parsed
+    async def _fetch_from_redis(self, exchange: str, symbol: str, limit: int) -> list[dict]:
+        """
+        Fetches from Redis using non-blocking ZSet commands.
+        """
+        # Data Contract: Points to the canonical 1-minute time-series ZSet.
+        key = f"market:series:{exchange.lower()}:{symbol.upper()}:1m"
+
+        try:
+            # ZREVRANGE is the correct non-blocking command to get the latest N items.
+            # It returns items from highest score (newest) to lowest.
+            raw_candles = await self._redis.zrevrange(key, 0, limit - 1)
+            if not raw_candles:
+                return []
+
+            parsed = []
+            for c in raw_candles:
+                try:
+                    # The members of the ZSet are orjson-encoded strings.
+                    parsed.append(orjson.loads(c))
+                except orjson.JSONDecodeError:
+                    continue
+
+            # The result from zrevrange is newest-to-oldest.
+            # Most indicator calculations expect oldest-to-newest.
+            return list(reversed(parsed))
+        except Exception as e:
+            log.warning(f"Redis ZSet fetch failed for {symbol}: {e}")
+            return []
