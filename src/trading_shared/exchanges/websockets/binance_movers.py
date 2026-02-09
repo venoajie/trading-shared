@@ -83,8 +83,9 @@ class BinanceMoversWsClient(AbstractWsClient):
                             pipe.hset(self.override_key, canonical_sym, orjson.dumps(payload))
                             # This promotes the *symbol* with a TTL, not the whole map.
                             # We create a separate key for the TTL to manage expiration.
-                            ttl_key = f"system:ttl:{self.override_key}:{canonical_sym}"
-                            pipe.set(ttl_key, 1, ex=self.override_ttl_seconds)
+
+                            ttl_tracking_key = f"system:state:mover_ttl:{canonical_sym}"
+                            pipe.set(ttl_tracking_key, "1", ex=self.override_ttl_seconds)
                             await pipe.execute()
 
                             log.info(f"💡 MOVER PROMOTED: {canonical_sym} | Event: {payload.get('eventType')}")

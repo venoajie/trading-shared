@@ -9,6 +9,8 @@ class MarketType(str, Enum):
     This is the Single Source of Truth for the entire system.
     """
 
+    SYSTEM_EVENT = "system_event"
+
     SPOT = "spot"
     SPOT_TICKER_24H = "spot_ticker_24h"
 
