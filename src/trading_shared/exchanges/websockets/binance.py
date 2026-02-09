@@ -70,7 +70,7 @@ class BinanceWsClient(AbstractWsClient):
                         payload = data.get("data")
                         stream = data.get("stream")
 
-                        # [FIX] Support both 'trade' and 'ticker' streams
+                        # Support both 'trade' and 'ticker' streams
                         if payload and stream:
                             is_trade = "trade" in stream
                             is_ticker = "ticker" in stream

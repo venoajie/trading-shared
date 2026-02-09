@@ -280,6 +280,7 @@ class CorrelationMatrix(BaseModel):
     is_significant: bool = False
     t_score: float = 0.0
 
+
 class EnhancedSignalEvent(BaseModel):
     """
     Signal Event enriched with Context, Metrics, and Visual Data.
