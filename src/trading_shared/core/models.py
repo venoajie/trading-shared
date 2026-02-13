@@ -309,3 +309,14 @@ class EnhancedSignalEvent(BaseModel):
     # Benchmark candle data.
     # It is optional because signals for BTC itself or system alerts won't have it.
     benchmark_candles: list[OHLCModel] | None = None
+
+
+class MoverSignalContext(BaseModel):
+    """
+    Standardized context derived from a raw Mover event.
+    """
+    direction: str = Field(..., description="Canonical direction: LONG or SHORT")
+    signal_type: str = Field(..., description="Internal signal classification: BREAKOUT, MOMENTUM, REVERSAL")
+    weight: int = Field(..., description="The raw weight from the MOVER_EVENT_MAP, indicating strength")
+    description: str = Field(..., description="Human-readable description of the event")
+    source_event: str = Field(..., description="The original event string, e.g., 'DOWN_BREAKTHROUGH'")
