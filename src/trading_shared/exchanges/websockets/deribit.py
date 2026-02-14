@@ -117,59 +117,58 @@ class DeribitWsClient(AbstractWsClient):
             log.info(f"[{self.exchange_name}] Subscribed to {len(self._active_channels)} public channels.")
 
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
-        """Manages a single, finite connection and yields messages."""
+        """
+        Manages a single, persistent connection, handling RPC responses and
+        yielding subscription messages concurrently.
+        """
         try:
             async with websockets.connect(self.ws_connection_url, ping_interval=30) as ws:
                 self._ws = ws
                 log.success(f"[{self.exchange_name}][{self.subscription_scope}] WebSocket connection established.")
-                await self._handle_subscriptions()
-                
-                log.debug(f"[{self.exchange_name}] self._ws: {self._ws}")
 
+                # Launch subscription handler as a background task so the message
+                # loop can start immediately to process responses.
+                asyncio.create_task(self._handle_subscriptions())
+
+                # The main loop now runs continuously after connection.
                 async for message in ws:
-                    # --- TEMPORARY LOGGING: See every raw message ---
                     log.debug(f"[{self.exchange_name}] RAW WS MSG: {message}")
-                    # ----------------------------------------------------
                     try:
                         data = orjson.loads(message)
-                        params = data.get("params", {})
-                        channel = params.get("channel")
-                        
-                        # --- MODIFIED LOGIC: Check for 'user.' channel directly ---
-                        if channel and "user." in channel:
-                            log.info(f"[{self.exchange_name}] Matched private channel: {channel}. Yielding message.")
-                            yield StreamMessage(
-                                exchange=self.exchange_name,
-                                channel=channel,
-                                timestamp=int(time.time() * 1000),
-                                data=data,  # Pass the full raw message for the formatter
-                            )
-                            continue # Move to the next message
-                        
-                        # --- Existing public channel logic ---
-                        payload = params.get("data")
-                        if payload and channel:
-                            if "trades" in channel:
-                                for trade in payload:
-                                    yield StreamMessage(
-                                        exchange=self.exchange_name,
-                                        channel=channel,
-                                        timestamp=trade.get("timestamp"),
-                                        data=trade,
-                                    )
-                            elif "ticker" in channel:
-                                symbol = payload.get("instrument_name")
-                                if symbol:
-                                    await self.market_data_repo.cache_ticker(self.exchange_name, symbol, payload)
+
+                        # --- LOGIC TO DIFFERENTIATE MESSAGE TYPES ---
+
+                        # Case 1: Subscription Data Push (This is what we want to stream)
+                        if data.get("method") == "subscription":
+                            params = data.get("params", {})
+                            channel = params.get("channel")
+                            payload = params.get("data")
+                            if channel and payload:
+                                log.info(f"[{self.exchange_name}] Received data on channel '{channel}'.")
+                                yield StreamMessage(
+                                    exchange=self.exchange_name,
+                                    channel=channel,
+                                    # Use the timestamp from the payload if available, else use current time
+                                    timestamp=payload.get("timestamp", int(time.time() * 1000)),
+                                    data=data,  # Pass the full raw message envelope
+                                )
+
+                        # Case 2: Response to our RPC call (e.g., auth, subscribe)
+                        elif "result" in data:
+                            log.info(f"[{self.exchange_name}] Received RPC Response: {data.get('id')}")
+                            # These are confirmations, no need to yield them.
+
+                        # Case 3: Heartbeat/Test requests from the server
+                        elif data.get("method") in ["heartbeat", "test_request"]:
+                            if data.get("method") == "heartbeat" and data.get("params", {}).get("type") == "test_request":
+                                await self._send_rpc("public/test", {})
+
+                        # Case 4: Unhandled message
                         else:
-                            # --- TEMPORARY LOGGING: See what gets dropped ---
-                            if "heartbeat" not in str(message) and "test" not in str(message):
-                                log.warning(f"[{self.exchange_name}] Dropping non-data message: {data.get('method', data)}")
-                            # --------------------------------------------------
+                            log.warning(f"[{self.exchange_name}] Unhandled message type: {message[:200]}")
 
                     except (orjson.JSONDecodeError, KeyError, TypeError) as e:
-                        if "heartbeat" not in str(message):
-                            log.warning(f"[{self.exchange_name}] Parsing error: {e}")
+                        log.warning(f"[{self.exchange_name}] Message parsing error: {e}")
 
         finally:
             self._ws = None
