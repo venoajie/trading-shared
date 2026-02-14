@@ -1,16 +1,19 @@
 
 # src/trading_shared/exchanges/websockets/deribit.py
 
+# --- Built Ins ---
 import asyncio
 import json
 import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
+# --- Installed ---
 import orjson
 import websockets
 from loguru import logger as log
 
+# --- Shared Library Imports ---
 from ...config.models import ExchangeSettings
 from ...core.models import MarketDefinition, StreamMessage
 from ...repositories.instrument_repository import InstrumentRepository
@@ -22,9 +25,10 @@ from .base import AbstractWsClient
 class DeribitWsClient(AbstractWsClient):
     """
     A robust, dual-purpose WebSocket client for Deribit.
-    Fixes:
-    1. Deadlock in authentication (Handshake vs Read Loop).
-    2. Serialization compatibility (json for RPC, orjson for Stream).
+    Features:
+    - Deadlock-free Authentication (Async Task Separation)
+    - High-Performance Stream Parsing (orjson)
+    - Verbose Private Event Logging
     """
 
     def __init__(
@@ -71,6 +75,7 @@ class DeribitWsClient(AbstractWsClient):
             # Use standard json for compatibility with Deribit's RPC parser
             payload_str = json.dumps(msg)
             
+            # Mask secrets in logs
             safe_params = {k: ("***" if "secret" in k.lower() else v) for k, v in params.items()}
             log.debug(f"[{self.exchange_name}] >>> RPC SEND | ID: {rpc_id} | Method: {method} | Params: {safe_params}")
             
@@ -125,9 +130,7 @@ class DeribitWsClient(AbstractWsClient):
                 self._ws = ws
                 log.success(f"[{self.exchange_name}][{self.subscription_scope}] WebSocket connection established.")
 
-                # --- CRITICAL FIX: DEADLOCK PREVENTION ---
                 # Spawn the handshake as a background task. 
-                # It needs the read loop (below) to be running to resolve its RPC requests.
                 handshake_task = asyncio.create_task(self._handle_subscriptions())
 
                 # Start the Read Loop immediately
@@ -150,8 +153,14 @@ class DeribitWsClient(AbstractWsClient):
 
                         # 2. Process Stream Messages
                         if params := data.get("params", {}):
-                            if (channel := params.get("channel")) and (payload := params.get("data")):
+                            channel = params.get("channel")
+                            payload = params.get("data")
+                            
+                            if channel and payload:
                                 if self.subscription_scope == "private":
+                                    # [VERBOSE LOGGING] Explicitly log receipt of private events
+                                    log.info(f"[{self.exchange_name}] 📥 Private Event: {channel} | Type: {list(payload.keys())}")
+                                    
                                     yield StreamMessage(
                                         exchange=self.exchange_name,
                                         channel=channel,
@@ -159,6 +168,7 @@ class DeribitWsClient(AbstractWsClient):
                                         data=payload,
                                     )
                                 elif "trades" in channel:
+                                    # Public trades (High Volume) - Keep logging silent or DEBUG only
                                     for trade in payload:
                                         yield StreamMessage(
                                             exchange=self.exchange_name,
@@ -185,6 +195,7 @@ class DeribitWsClient(AbstractWsClient):
             self._rpc_tracker.clear()
 
     async def _process_message_batch(self):
+        """Inner loop to consume messages and write them to the Redis stream."""
         try:
             async for message in self.connect():
                 await self.market_data_repo.add_messages_to_stream(self.stream_name, [message])
@@ -196,8 +207,10 @@ class DeribitWsClient(AbstractWsClient):
             log.exception(f"[{self.exchange_name}] Unexpected error in message batch processor.")
 
     async def process_messages(self):
+        """The main supervisor loop that manages the connection lifecycle."""
         self._is_running.set()
         reconnect_attempts = 0
+        subscription_task = None
         
         # Public: Dynamic subscription manager
         if self.subscription_scope == "public":
@@ -211,9 +224,10 @@ class DeribitWsClient(AbstractWsClient):
                 await self._reconnect_event.wait()
                 self._reconnect_event.clear()
 
-                await self._process_message_batch()
-                reconnect_attempts = 0
+                batch_task = asyncio.create_task(self._process_message_batch())
+                await batch_task  # Awaits until the connection is lost.
 
+                reconnect_attempts = 0
             except asyncio.CancelledError:
                 break
             except Exception:
@@ -226,11 +240,12 @@ class DeribitWsClient(AbstractWsClient):
                 await asyncio.sleep(delay)
                 self._reconnect_event.set()
 
-        if 'subscription_task' in locals() and not subscription_task.done():
+        if subscription_task:
             subscription_task.cancel()
         log.info(f"[{self.exchange_name}][{self.subscription_scope}] Supervisor loop has shut down.")
 
     async def _get_channels_from_universe(self, universe: list[str]) -> set[str]:
+        # Private client does not need universe mapping
         return set()
 
     async def close(self):
