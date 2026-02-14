@@ -125,18 +125,29 @@ class DeribitWsClient(AbstractWsClient):
                 await self._handle_subscriptions()
 
                 async for message in ws:
+                    # --- TEMPORARY LOGGING: See every raw message ---
+                    log.debug(f"[{self.exchange_name}] RAW WS MSG: {message}")
+                    # ----------------------------------------------------
                     try:
                         data = orjson.loads(message)
-
-                        # Deribit Notifications come in 'params' -> 'data'
                         params = data.get("params", {})
                         channel = params.get("channel")
+                        
+                        # --- MODIFIED LOGIC: Check for 'user.' channel directly ---
+                        if channel and "user." in channel:
+                            log.info(f"[{self.exchange_name}] Matched private channel: {channel}. Yielding message.")
+                            yield StreamMessage(
+                                exchange=self.exchange_name,
+                                channel=channel,
+                                timestamp=int(time.time() * 1000),
+                                data=data,  # Pass the full raw message for the formatter
+                            )
+                            continue # Move to the next message
+                        
+                        # --- Existing public channel logic ---
                         payload = params.get("data")
-
                         if payload and channel:
-                            # ROUTING LOGIC
                             if "trades" in channel:
-                                # Deribit 'trades' payload is a LIST of trades
                                 for trade in payload:
                                     yield StreamMessage(
                                         exchange=self.exchange_name,
@@ -144,32 +155,17 @@ class DeribitWsClient(AbstractWsClient):
                                         timestamp=trade.get("timestamp"),
                                         data=trade,
                                     )
-
                             elif "ticker" in channel:
-                                # DIRECT CACHE UPDATE (Ticker)
-                                # Deribit uses 'instrument_name', NOT 's'
                                 symbol = payload.get("instrument_name")
                                 if symbol:
-                                    # Cache raw payload
-                                    await self.market_data_repo.cache_ticker(symbol, payload)
-                            
-                            # --- ADD THIS BLOCK ---
-                            elif "user." in channel:
-                                # Pass through ALL private user events (orders, portfolio, changes)
-                                # We use the current server time as timestamp since 'changes' messages 
-                                # are aggregates and don't always have a single clean timestamp.
-                                yield StreamMessage(
-                                    exchange=self.exchange_name,
-                                    channel=channel,
-                                    timestamp=int(time.time() * 1000),
-                                    # We send the FULL original message 'data' (including params wrapper)
-                                    # so the Notifier formatter can parse it correctly.
-                                    data=data 
-                                )
-                            # ----------------------
+                                    await self.market_data_repo.cache_ticker(self.exchange_name, symbol, payload)
+                        else:
+                            # --- TEMPORARY LOGGING: See what gets dropped ---
+                            if "heartbeat" not in str(message) and "test" not in str(message):
+                                log.warning(f"[{self.exchange_name}] Dropping non-data message: {data.get('method', data)}")
+                            # --------------------------------------------------
 
                     except (orjson.JSONDecodeError, KeyError, TypeError) as e:
-                        # Reduce noise, but log on actual parse errors
                         if "heartbeat" not in str(message):
                             log.warning(f"[{self.exchange_name}] Parsing error: {e}")
 
