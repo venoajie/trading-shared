@@ -4,6 +4,7 @@
 import asyncio
 import time
 from collections.abc import AsyncGenerator
+from typing import Any
 
 import orjson
 import websockets
@@ -17,11 +18,6 @@ from ...repositories.system_state_repository import SystemStateRepository
 from .base import AbstractWsClient
 
 class DeribitWsClient(AbstractWsClient):
-    """
-    Deribit WebSocket Client.
-    Implementation includes full packet inspection for private event debugging.
-    """
-
     def __init__(
         self,
         market_definition: MarketDefinition,
@@ -40,116 +36,115 @@ class DeribitWsClient(AbstractWsClient):
         self.universe_state_key = universe_state_key
         self.ws_connection_url = self.market_def.ws_base_url
         self._ws: websockets.WebSocketClientProtocol | None = None
+        
+        # RPC Tracking: Maps ID -> asyncio.Future
+        self._rpc_tracker: dict[int, asyncio.Future] = {}
 
         if self.subscription_scope == "private" and (not settings.client_id or not settings.client_secret):
             raise ValueError("Deribit private scope requires client_id and client_secret.")
 
-    async def _get_channels_from_universe(self, universe: list[dict]) -> set[str]:
+    async def _send_rpc(self, method: str, params: dict) -> Any:
         """
-        Required by AbstractWsClient. Maps universe symbols to Deribit channels.
-        Used primarily for public ticker/trade streams.
+        Sends JSON-RPC and WAITS for the response.
+        Enforces Text Frames (UTF-8) to avoid 'bad_request' errors.
         """
-        my_targets = set()
-        for asset_pair in universe:
-            if asset_pair.get("exchange_spot") == self.exchange_name:
-                if symbol := asset_pair.get("spot_symbol"):
-                    my_targets.add(symbol)
-            if asset_pair.get("exchange_perp") == self.exchange_name:
-                if symbol := asset_pair.get("perp_symbol"):
-                    my_targets.add(symbol)
-
-        # Apply sharding logic
-        sharded_targets = {
-            symbol for i, symbol in enumerate(sorted(my_targets)) 
-            if i % self.total_shards == self.shard_id
-        }
-
-        channels = set()
-        for symbol in sharded_targets:
-            s_lower = symbol.lower()
-            channels.add(f"trades.{s_lower}.100ms")
-            channels.add(f"ticker.{s_lower}.100ms")
-        
-        log.debug(f"[{self.exchange_name}] Derived {len(channels)} channels from universe.")
-        return channels
-
-    async def _send_rpc(self, method: str, params: dict):
-        """Sends JSON-RPC and logs the raw output for debugging."""
         if not self._ws:
-            log.error(f"[{self.exchange_name}] RPC ABORTED: No connection for '{method}'")
-            return
-        
-        rpc_id = int(time.time() * 1000)
+            raise ConnectionError(f"[{self.exchange_name}] Cannot send RPC: No active connection.")
+
+        rpc_id = int(time.time() * 1000000) # Microsecond precision for unique IDs
         msg = {
             "jsonrpc": "2.0",
             "id": rpc_id,
             "method": method,
             "params": params,
         }
-        
-        # Security: Mask sensitive credentials in logs
-        safe_params = {k: ("***" if "secret" in k.lower() else v) for k, v in params.items()}
-        
-        log.info(f"[{self.exchange_name}] >>> RPC SEND | ID: {rpc_id} | Method: {method} | Params: {safe_params}")
-        await self._ws.send(orjson.dumps(msg))
+
+        # Create a future to wait for the response
+        future = asyncio.get_running_loop().create_future()
+        self._rpc_tracker[rpc_id] = future
+
+        try:
+            # CRITICAL FIX: Convert bytes to string to ensure Text Frame
+            payload = orjson.dumps(msg).decode("utf-8")
+            
+            safe_params = {k: ("***" if "secret" in k.lower() else v) for k, v in params.items()}
+            log.info(f"[{self.exchange_name}] >>> RPC REQ | ID: {rpc_id} | Method: {method} | Params: {safe_params}")
+            
+            await self._ws.send(payload)
+            
+            # Wait for response with timeout
+            return await asyncio.wait_for(future, timeout=10.0)
+        except asyncio.TimeoutError:
+            log.error(f"[{self.exchange_name}] RPC TIMEOUT | ID: {rpc_id} | Method: {method}")
+            raise
+        finally:
+            self._rpc_tracker.pop(rpc_id, None)
 
     async def _handle_subscriptions(self):
-        """Executes Auth and Subscription with verbose state logging."""
-        if self.subscription_scope == "private":
-            log.info(f"[{self.exchange_name}] Step 1: Sending public/auth request...")
-            auth_params = {
-                "grant_type": "client_credentials",
-                "client_id": self.settings.client_id,
-                "client_secret": self.settings.client_secret.get_secret_value(),
-            }
-            await self._send_rpc("public/auth", auth_params)
-            
-            # Brief pause to ensure auth processes at the exchange
-            await asyncio.sleep(0.2) 
-            
-            log.info(f"[{self.exchange_name}] Step 2: Requesting private channel subscription...")
-            await self._send_subscribe(["user.changes.any.any.raw"])
+        """Sequential Auth -> Subscribe flow with strict response checking."""
+        try:
+            if self.subscription_scope == "private":
+                log.info(f"[{self.exchange_name}] Initiating Authentication...")
+                auth_params = {
+                    "grant_type": "client_credentials",
+                    "client_id": self.settings.client_id,
+                    "client_secret": self.settings.client_secret.get_secret_value(),
+                }
+                
+                auth_result = await self._send_rpc("public/auth", auth_params)
+                log.success(f"[{self.exchange_name}] Authentication Successful. Session expires in: {auth_result.get('expires_in')}s")
 
-        elif self.subscription_scope == "public" and self._active_channels:
-            log.info(f"[{self.exchange_name}] Subscribing to {len(self._active_channels)} public channels.")
-            await self._send_subscribe(list(self._active_channels))
+                # Only proceed to subscribe if auth succeeded
+                channels = ["user.changes.any.any.raw"]
+                log.info(f"[{self.exchange_name}] Subscribing to Private Channels: {channels}")
+                sub_result = await self._send_rpc("private/subscribe", {"channels": channels})
+                log.success(f"[{self.exchange_name}] Subscription Confirmed: {sub_result}")
+
+            elif self.subscription_scope == "public" and self._active_channels:
+                await self._send_rpc("public/subscribe", {"channels": list(self._active_channels)})
+
+        except Exception as e:
+            log.error(f"[{self.exchange_name}] Setup Failed: {e}")
+            # Close connection to trigger supervisor reconnect
+            if self._ws:
+                await self._ws.close()
 
     async def connect(self) -> AsyncGenerator[StreamMessage, None]:
-        """Ingestion loop with full RAW packet logging for debugging."""
-        log.info(f"[{self.exchange_name}] Connecting to: {self.ws_connection_url}")
+        """Managed connection yielding validated private events."""
+        log.info(f"[{self.exchange_name}] Connecting to {self.ws_connection_url}...")
         
         try:
             async with websockets.connect(self.ws_connection_url, ping_interval=30) as ws:
                 self._ws = ws
-                log.success(f"[{self.exchange_name}] TCP/TLS Connection Established.")
+                log.success(f"[{self.exchange_name}] Connection Established.")
                 
+                # Setup Auth/Subs
                 await self._handle_subscriptions()
 
                 async for raw_message in ws:
-                    # LOG EVERY RAW PACKET FOR DEBUGGING
-                    log.debug(f"[{self.exchange_name}] <<< RAW RECV: {raw_message}")
-                    
                     try:
                         data = orjson.loads(raw_message)
 
-                        # Handle RPC Responses (Auth success/fail, Subscription success/fail)
-                        if "result" in data:
-                            log.success(f"[{self.exchange_name}] RPC SUCCESS | ID: {data.get('id')} | Result: {data.get('result')}")
-                            continue
-                        
-                        if "error" in data:
-                            log.error(f"[{self.exchange_name}] RPC FAILURE | ID: {data.get('id')} | Error: {data.get('error')}")
+                        # Check if this is a response to a tracked RPC
+                        resp_id = data.get("id")
+                        if resp_id in self._rpc_tracker:
+                            future = self._rpc_tracker[resp_id]
+                            if "error" in data:
+                                future.set_exception(RuntimeError(f"RPC Error: {data['error']}"))
+                            else:
+                                future.set_result(data.get("result"))
                             continue
 
-                        # Extract Notification Data (the actual events)
+                        # Process streaming notifications
                         params = data.get("params", {})
                         channel = params.get("channel")
                         payload = params.get("data")
 
                         if payload and channel:
+                            # Private account events (Orders/Fills)
                             if self.subscription_scope == "private":
-                                log.info(f"[{self.exchange_name}] EVENT DETECTED [{channel}] | PAYLOAD: {payload}")
-                                
+                                # Log private events for audit trail
+                                log.info(f"[{self.exchange_name}] PRIVATE_EVENT | Channel: {channel}")
                                 yield StreamMessage(
                                     exchange=self.exchange_name,
                                     channel=channel,
@@ -157,6 +152,7 @@ class DeribitWsClient(AbstractWsClient):
                                     data=payload,
                                 )
                             
+                            # Public trade events
                             elif "trades" in channel:
                                 for trade in payload:
                                     yield StreamMessage(
@@ -166,34 +162,23 @@ class DeribitWsClient(AbstractWsClient):
                                         data=trade,
                                     )
 
-                            elif "ticker" in channel:
-                                symbol = payload.get("instrument_name")
-                                if symbol:
-                                    await self.market_data_repo.cache_ticker(self.exchange_name, symbol, payload)
-
                     except Exception as e:
-                        log.error(f"[{self.exchange_name}] Parse Error: {e} | Data: {raw_message[:100]}")
+                        if "heartbeat" not in str(raw_message):
+                            log.error(f"[{self.exchange_name}] Message Error: {e}")
 
         finally:
             self._ws = None
-            log.warning(f"[{self.exchange_name}] Connection closed.")
-
-    async def _send_subscribe(self, channels: list[str]):
-        method = f"{self.subscription_scope}/subscribe"
-        await self._send_rpc(method, {"channels": channels})
-
-    async def _send_unsubscribe(self, channels: list[str]):
-        method = f"{self.subscription_scope}/unsubscribe"
-        await self._send_rpc(method, {"channels": channels})
+            # Cancel any pending RPCs
+            for future in self._rpc_tracker.values():
+                if not future.done():
+                    future.cancel()
+            self._rpc_tracker.clear()
 
     async def _process_message_batch(self):
-        """Consumes validated messages and pushes to Redis."""
         async for message in self.connect():
-            log.debug(f"[{self.exchange_name}] Stream Emitter: Pushing event to {self.stream_name}")
             await self.market_data_repo.add_messages_to_stream(self.stream_name, [message])
 
     async def process_messages(self):
-        """Supervisor loop managing connection lifecycle."""
         self._is_running.set()
         
         if self.subscription_scope == "public":
@@ -205,20 +190,17 @@ class DeribitWsClient(AbstractWsClient):
             try:
                 await self._reconnect_event.wait()
                 self._reconnect_event.clear()
-
-                log.info(f"[{self.exchange_name}] Starting WebSocket Ingestion Task...")
                 await self._process_message_batch()
-
-            except asyncio.CancelledError:
-                break
             except Exception as e:
-                log.exception(f"[{self.exchange_name}] Supervisor Error: {e}")
+                log.exception(f"[{self.exchange_name}] Supervisor Loop Error: {e}")
 
             if self._is_running.is_set():
-                delay = 5 # Fixed delay for debugging to avoid spamming
-                log.info(f"[{self.exchange_name}] Restarting supervisor in {delay}s...")
-                await asyncio.sleep(delay)
+                await asyncio.sleep(5)
                 self._reconnect_event.set()
+
+    async def _get_channels_from_universe(self, universe: list[dict]) -> set[str]:
+        # Required implementation for abstract base
+        return set()
 
     async def close(self):
         self._is_running.clear()
