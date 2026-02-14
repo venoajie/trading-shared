@@ -6,7 +6,7 @@ import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
-import orjson
+import json
 import websockets
 from loguru import logger as log
 
@@ -65,7 +65,7 @@ class DeribitWsClient(AbstractWsClient):
 
         try:
             # CRITICAL FIX: Convert bytes to string to ensure Text Frame
-            payload = orjson.dumps(msg).decode("utf-8")
+            payload = json.dumps(msg).decode("utf-8")
             
             safe_params = {k: ("***" if "secret" in k.lower() else v) for k, v in params.items()}
             log.info(f"[{self.exchange_name}] >>> RPC REQ | ID: {rpc_id} | Method: {method} | Params: {safe_params}")
@@ -123,7 +123,7 @@ class DeribitWsClient(AbstractWsClient):
 
                 async for raw_message in ws:
                     try:
-                        data = orjson.loads(raw_message)
+                        data = json.loads(raw_message)
 
                         # Check if this is a response to a tracked RPC
                         resp_id = data.get("id")
