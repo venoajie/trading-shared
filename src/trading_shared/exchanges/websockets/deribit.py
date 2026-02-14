@@ -2,7 +2,7 @@
 # src/trading_shared/exchanges/websockets/deribit.py
 
 import asyncio
-import json  # <-- MODIFIED: Import the standard json library
+import json
 import time
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -21,9 +21,10 @@ from .base import AbstractWsClient
 
 class DeribitWsClient(AbstractWsClient):
     """
-    A robust, dual-purpose WebSocket client for Deribit, designed for high-availability
-    and clear separation of public/private scopes. It features a request/response
-    tracking system for all critical RPC calls to ensure operational correctness.
+    A robust, dual-purpose WebSocket client for Deribit.
+    Fixes:
+    1. Deadlock in authentication (Handshake vs Read Loop).
+    2. Serialization compatibility (json for RPC, orjson for Stream).
     """
 
     def __init__(
@@ -44,31 +45,40 @@ class DeribitWsClient(AbstractWsClient):
         self.universe_state_key = universe_state_key
         self.ws_connection_url = self.market_def.ws_base_url
         self._ws: websockets.WebSocketClientProtocol | None = None
+        
+        # Maps RPC ID -> asyncio.Future
         self._rpc_tracker: dict[int, asyncio.Future] = {}
 
         if self.subscription_scope == "private" and (not settings.client_id or not settings.client_secret):
             raise ValueError("Deribit private scope requires client_id and client_secret.")
 
     async def _send_rpc(self, method: str, params: dict) -> Any:
+        """
+        Sends an RPC request and waits for the response.
+        Relies on the main read loop to resolve the future.
+        """
         if not self._ws:
             raise ConnectionError(f"[{self.exchange_name}] Cannot send RPC: No active connection.")
 
         rpc_id = int(time.time() * 1_000_000)
         msg = {"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params}
+        
+        # Create a future that the read loop will resolve
         future = asyncio.get_running_loop().create_future()
         self._rpc_tracker[rpc_id] = future
 
         try:
-            # --- CRITICAL FIX ---
-            # Reverted to standard `json.dumps` for outgoing RPC calls.
-            # The Deribit auth endpoint is strict and silently drops requests
-            # formatted by `orjson`. This ensures maximum compatibility.
+            # Use standard json for compatibility with Deribit's RPC parser
             payload_str = json.dumps(msg)
-
+            
             safe_params = {k: ("***" if "secret" in k.lower() else v) for k, v in params.items()}
             log.debug(f"[{self.exchange_name}] >>> RPC SEND | ID: {rpc_id} | Method: {method} | Params: {safe_params}")
+            
             await self._ws.send(payload_str)
+            
+            # Wait for response (resolved by read loop)
             return await asyncio.wait_for(future, timeout=10.0)
+            
         except asyncio.TimeoutError:
             log.error(f"[{self.exchange_name}] RPC TIMEOUT | ID: {rpc_id} | Method: {method}")
             raise
@@ -76,6 +86,10 @@ class DeribitWsClient(AbstractWsClient):
             self._rpc_tracker.pop(rpc_id, None)
 
     async def _handle_subscriptions(self):
+        """
+        Performs the Auth -> Subscribe sequence.
+        Must run concurrently with the read loop.
+        """
         try:
             if self.subscription_scope == "private":
                 log.info(f"[{self.exchange_name}] Initiating authentication...")
@@ -84,6 +98,7 @@ class DeribitWsClient(AbstractWsClient):
                     "client_id": self.settings.client_id,
                     "client_secret": self.settings.client_secret.get_secret_value(),
                 }
+                # This await will block this task until the read loop receives the response
                 auth_result = await self._send_rpc("public/auth", auth_params)
                 log.success(f"[{self.exchange_name}] Authentication successful. Access token expires in {auth_result.get('expires_in')}s.")
 
@@ -96,8 +111,10 @@ class DeribitWsClient(AbstractWsClient):
                 log.info(f"[{self.exchange_name}] Subscribing to {len(self._active_channels)} public channels.")
                 await self._send_rpc("public/subscribe", {"channels": list(self._active_channels)})
                 log.success(f"[{self.exchange_name}] Public channel subscription sent.")
+
         except Exception as e:
-            log.error(f"[{self.exchange_name}] Connection setup failed: {e}", exc_info=True)
+            log.error(f"[{self.exchange_name}] Handshake/Subscription failed: {e}", exc_info=True)
+            # Critical: Close the socket to force the supervisor to restart the connection
             if self._ws:
                 await self._ws.close()
 
@@ -107,12 +124,19 @@ class DeribitWsClient(AbstractWsClient):
             async with websockets.connect(self.ws_connection_url, ping_interval=30) as ws:
                 self._ws = ws
                 log.success(f"[{self.exchange_name}][{self.subscription_scope}] WebSocket connection established.")
-                await self._handle_subscriptions()
+
+                # --- CRITICAL FIX: DEADLOCK PREVENTION ---
+                # Spawn the handshake as a background task. 
+                # It needs the read loop (below) to be running to resolve its RPC requests.
+                handshake_task = asyncio.create_task(self._handle_subscriptions())
+
+                # Start the Read Loop immediately
                 async for raw_message in ws:
                     try:
-                        # Keep using high-performance orjson for parsing incoming messages
+                        # Use orjson for high-speed stream parsing
                         data = orjson.loads(raw_message)
 
+                        # 1. Check for RPC Responses (Handshake logic)
                         if (resp_id := data.get("id")) in self._rpc_tracker:
                             future = self._rpc_tracker[resp_id]
                             if "error" in data:
@@ -124,6 +148,7 @@ class DeribitWsClient(AbstractWsClient):
                                 future.set_result(result)
                             continue
 
+                        # 2. Process Stream Messages
                         if params := data.get("params", {}):
                             if (channel := params.get("channel")) and (payload := params.get("data")):
                                 if self.subscription_scope == "private":
@@ -141,12 +166,19 @@ class DeribitWsClient(AbstractWsClient):
                                             timestamp=trade.get("timestamp"),
                                             data=trade,
                                         )
+
                     except (orjson.JSONDecodeError, KeyError, TypeError) as e:
                         if "heartbeat" not in str(raw_message):
-                            log.warning(f"[{self.exchange_name}] Error processing message: {e} | Raw: {str(raw_message)[:150]}")
+                            log.warning(f"[{self.exchange_name}] Error processing message: {e}")
+                
+                # If read loop exits, ensure handshake task is cleaned up
+                if not handshake_task.done():
+                    handshake_task.cancel()
+
         finally:
             self._ws = None
             log.warning(f"[{self.exchange_name}][{self.subscription_scope}] WebSocket connection closed.")
+            # Cleanup pending RPCs
             for future in self._rpc_tracker.values():
                 if not future.done():
                     future.cancel()
@@ -166,17 +198,22 @@ class DeribitWsClient(AbstractWsClient):
     async def process_messages(self):
         self._is_running.set()
         reconnect_attempts = 0
+        
+        # Public: Dynamic subscription manager
         if self.subscription_scope == "public":
             subscription_task = asyncio.create_task(self._maintain_subscriptions())
         else:
+            # Private: Trigger immediate connection
             self._reconnect_event.set()
 
         while self._is_running.is_set():
             try:
                 await self._reconnect_event.wait()
                 self._reconnect_event.clear()
+
                 await self._process_message_batch()
                 reconnect_attempts = 0
+
             except asyncio.CancelledError:
                 break
             except Exception:
