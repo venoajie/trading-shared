@@ -1,7 +1,7 @@
 # src/trading_shared/repositories/market_data_repository.py
 
 from collections import deque
-from typing import Any, List, Union
+from typing import Any
 
 import orjson
 from loguru import logger as log
@@ -22,7 +22,7 @@ class MarketDataRepository:
     async def add_messages_to_stream(
         self,
         stream_name: str,
-        messages: Union[List[StreamMessage], deque[StreamMessage]],
+        messages: list[StreamMessage] | deque[StreamMessage],
         maxlen: int = 10000,
     ):
         """
@@ -32,17 +32,14 @@ class MarketDataRepository:
         if not messages:
             return
 
-        message_dicts = [
-            {"payload": msg.model_dump_json(exclude_none=True)} 
-            for msg in messages
-        ]
-        
+        message_dicts = [{"payload": msg.model_dump_json(exclude_none=True)} for msg in messages]
+
         try:
             await self._redis.xadd_bulk(stream_name, message_dicts, maxlen=maxlen)
         except Exception as e:
             log.error(f"Failed to publish {len(messages)} messages to stream '{stream_name}': {e}")
             raise
-        
+
     async def cache_ticker(self, exchange: str, symbol: str, data: dict[str, Any], ttl_seconds: int = 5400):
         """Caches ticker data with a 90-minute TTL using the canonical key schema."""
         redis_key = f"market:cache:{exchange.lower()}:ticker:{symbol.upper()}"

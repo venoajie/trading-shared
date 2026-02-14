@@ -48,7 +48,7 @@ class DeribitWsClient(AbstractWsClient):
         self.universe_state_key = universe_state_key
         self.ws_connection_url = self.market_def.ws_base_url
         self._ws: websockets.WebSocketClientProtocol | None = None
-        
+
         # Maps RPC ID -> asyncio.Future
         self._rpc_tracker: dict[int, asyncio.Future] = {}
 
@@ -64,21 +64,21 @@ class DeribitWsClient(AbstractWsClient):
 
         rpc_id = int(time.time() * 1_000_000)
         msg = {"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params}
-        
+
         future = asyncio.get_running_loop().create_future()
         self._rpc_tracker[rpc_id] = future
 
         try:
-            # We use json.dumps for logging to easily mask secrets if needed, 
-            # but send using orjson if performance was critical. 
+            # We use json.dumps for logging to easily mask secrets if needed,
+            # but send using orjson if performance was critical.
             # For RPC control messages, standard json is safer for type compatibility.
             payload_str = json.dumps(msg)
             safe_params = {k: ("***" if "secret" in k.lower() else v) for k, v in params.items()}
             log.debug(f"[{self.exchange_name}] >>> RPC SEND | ID: {rpc_id} | Method: {method} | Params: {safe_params}")
-            
+
             await self._ws.send(payload_str)
             return await asyncio.wait_for(future, timeout=10.0)
-            
+
         except asyncio.TimeoutError:
             log.error(f"[{self.exchange_name}] RPC TIMEOUT | ID: {rpc_id} | Method: {method}")
             raise
@@ -98,7 +98,7 @@ class DeribitWsClient(AbstractWsClient):
                     "client_secret": self.settings.client_secret.get_secret_value(),
                 }
                 auth_result = await self._send_rpc("public/auth", auth_params)
-                expires_in = auth_result.get('expires_in', 'unknown')
+                expires_in = auth_result.get("expires_in", "unknown")
                 log.success(f"[{self.exchange_name}] Authentication successful. Access token expires in {expires_in}s.")
 
                 private_channels = ["user.changes.any.any.raw"]
@@ -162,7 +162,7 @@ class DeribitWsClient(AbstractWsClient):
                     except (orjson.JSONDecodeError, KeyError, TypeError) as e:
                         if "heartbeat" not in str(raw_message):
                             log.warning(f"[{self.exchange_name}] Error processing message: {e}")
-                
+
                 if not handshake_task.done():
                     handshake_task.cancel()
         finally:
@@ -190,7 +190,7 @@ class DeribitWsClient(AbstractWsClient):
         self._is_running.set()
         reconnect_attempts = 0
         subscription_task = None
-        
+
         if self.subscription_scope == "public":
             subscription_task = asyncio.create_task(self._maintain_subscriptions())
         else:

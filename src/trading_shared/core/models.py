@@ -315,6 +315,7 @@ class MoverSignalContext(BaseModel):
     """
     Standardized context derived from a raw Mover event.
     """
+
     direction: str = Field(..., description="Canonical direction: LONG or SHORT")
     signal_type: str = Field(..., description="Internal signal classification: BREAKOUT, MOMENTUM, REVERSAL")
     weight: int = Field(..., description="The raw weight from the MOVER_EVENT_MAP, indicating strength")
