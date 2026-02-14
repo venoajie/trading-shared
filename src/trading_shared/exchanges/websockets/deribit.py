@@ -123,6 +123,8 @@ class DeribitWsClient(AbstractWsClient):
                 self._ws = ws
                 log.success(f"[{self.exchange_name}][{self.subscription_scope}] WebSocket connection established.")
                 await self._handle_subscriptions()
+                
+                log.debug(f"[{self.exchange_name}] self._ws: {self._ws}")
 
                 async for message in ws:
                     # --- TEMPORARY LOGGING: See every raw message ---
