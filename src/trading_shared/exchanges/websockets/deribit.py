@@ -152,6 +152,21 @@ class DeribitWsClient(AbstractWsClient):
                                 if symbol:
                                     # Cache raw payload
                                     await self.market_data_repo.cache_ticker(symbol, payload)
+                            
+                            # --- ADD THIS BLOCK ---
+                            elif "user." in channel:
+                                # Pass through ALL private user events (orders, portfolio, changes)
+                                # We use the current server time as timestamp since 'changes' messages 
+                                # are aggregates and don't always have a single clean timestamp.
+                                yield StreamMessage(
+                                    exchange=self.exchange_name,
+                                    channel=channel,
+                                    timestamp=int(time.time() * 1000),
+                                    # We send the FULL original message 'data' (including params wrapper)
+                                    # so the Notifier formatter can parse it correctly.
+                                    data=data 
+                                )
+                            # ----------------------
 
                     except (orjson.JSONDecodeError, KeyError, TypeError) as e:
                         # Reduce noise, but log on actual parse errors
@@ -161,7 +176,7 @@ class DeribitWsClient(AbstractWsClient):
         finally:
             self._ws = None
             log.warning(f"[{self.exchange_name}][{self.subscription_scope}] WebSocket connection closed.")
-
+            
     async def _process_message_batch(self):
         """Inner loop to consume messages and write them to the Redis stream."""
         try:
