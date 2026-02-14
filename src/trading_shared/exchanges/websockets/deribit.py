@@ -65,7 +65,7 @@ class DeribitWsClient(AbstractWsClient):
 
         try:
             # CRITICAL FIX: Convert bytes to string to ensure Text Frame
-            payload = json.dumps(msg).decode("utf-8")
+            payload = json.dumps(msg)
             
             safe_params = {k: ("***" if "secret" in k.lower() else v) for k, v in params.items()}
             log.info(f"[{self.exchange_name}] >>> RPC REQ | ID: {rpc_id} | Method: {method} | Params: {safe_params}")
