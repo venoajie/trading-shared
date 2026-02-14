@@ -67,21 +67,15 @@ class DeribitWsClient(AbstractWsClient):
         rpc_id = int(time.time() * 1_000_000)
         msg = {"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params}
         
-        # Create a future that the read loop will resolve
         future = asyncio.get_running_loop().create_future()
         self._rpc_tracker[rpc_id] = future
 
         try:
-            # Use standard json for compatibility with Deribit's RPC parser
             payload_str = json.dumps(msg)
-            
-            # Mask secrets in logs
             safe_params = {k: ("***" if "secret" in k.lower() else v) for k, v in params.items()}
             log.debug(f"[{self.exchange_name}] >>> RPC SEND | ID: {rpc_id} | Method: {method} | Params: {safe_params}")
             
             await self._ws.send(payload_str)
-            
-            # Wait for response (resolved by read loop)
             return await asyncio.wait_for(future, timeout=10.0)
             
         except asyncio.TimeoutError:
@@ -103,7 +97,6 @@ class DeribitWsClient(AbstractWsClient):
                     "client_id": self.settings.client_id,
                     "client_secret": self.settings.client_secret.get_secret_value(),
                 }
-                # This await will block this task until the read loop receives the response
                 auth_result = await self._send_rpc("public/auth", auth_params)
                 log.success(f"[{self.exchange_name}] Authentication successful. Access token expires in {auth_result.get('expires_in')}s.")
 
@@ -119,7 +112,6 @@ class DeribitWsClient(AbstractWsClient):
 
         except Exception as e:
             log.error(f"[{self.exchange_name}] Handshake/Subscription failed: {e}", exc_info=True)
-            # Critical: Close the socket to force the supervisor to restart the connection
             if self._ws:
                 await self._ws.close()
 
@@ -130,16 +122,12 @@ class DeribitWsClient(AbstractWsClient):
                 self._ws = ws
                 log.success(f"[{self.exchange_name}][{self.subscription_scope}] WebSocket connection established.")
 
-                # Spawn the handshake as a background task. 
                 handshake_task = asyncio.create_task(self._handle_subscriptions())
 
-                # Start the Read Loop immediately
                 async for raw_message in ws:
                     try:
-                        # Use orjson for high-speed stream parsing
                         data = orjson.loads(raw_message)
 
-                        # 1. Check for RPC Responses (Handshake logic)
                         if (resp_id := data.get("id")) in self._rpc_tracker:
                             future = self._rpc_tracker[resp_id]
                             if "error" in data:
@@ -151,44 +139,34 @@ class DeribitWsClient(AbstractWsClient):
                                 future.set_result(result)
                             continue
 
-                        # 2. Process Stream Messages
-                        if params := data.get("params", {}):
-                            channel = params.get("channel")
-                            payload = params.get("data")
-                            
-                            if channel and payload:
-                                if self.subscription_scope == "private":
-                                    # [VERBOSE LOGGING] Explicitly log receipt of private events
-                                    log.info(f"[{self.exchange_name}] 📥 Private Event: {channel} | Type: {list(payload.keys())}")
-                                    
+                        if (params := data.get("params", {})) and (channel := params.get("channel")):
+                            # [REFACTOR] For private scope, forward the *entire* raw message object
+                            # to adhere to the lossless ingestion mandate.
+                            if self.subscription_scope == "private":
+                                log.info(f"[{self.exchange_name}] 📥 Private Event: {channel}")
+                                yield StreamMessage(
+                                    exchange=self.exchange_name,
+                                    channel=channel,
+                                    timestamp=int(time.time() * 1000),
+                                    data=data,  # Yield the full parsed JSON object
+                                )
+                            elif "trades" in channel and (payload := params.get("data")):
+                                for trade in payload:
                                     yield StreamMessage(
                                         exchange=self.exchange_name,
                                         channel=channel,
-                                        timestamp=int(time.time() * 1000),
-                                        data=payload,
+                                        timestamp=trade.get("timestamp"),
+                                        data=trade,
                                     )
-                                elif "trades" in channel:
-                                    # Public trades (High Volume) - Keep logging silent or DEBUG only
-                                    for trade in payload:
-                                        yield StreamMessage(
-                                            exchange=self.exchange_name,
-                                            channel=channel,
-                                            timestamp=trade.get("timestamp"),
-                                            data=trade,
-                                        )
-
                     except (orjson.JSONDecodeError, KeyError, TypeError) as e:
                         if "heartbeat" not in str(raw_message):
                             log.warning(f"[{self.exchange_name}] Error processing message: {e}")
                 
-                # If read loop exits, ensure handshake task is cleaned up
                 if not handshake_task.done():
                     handshake_task.cancel()
-
         finally:
             self._ws = None
             log.warning(f"[{self.exchange_name}][{self.subscription_scope}] WebSocket connection closed.")
-            # Cleanup pending RPCs
             for future in self._rpc_tracker.values():
                 if not future.done():
                     future.cancel()
@@ -212,27 +190,22 @@ class DeribitWsClient(AbstractWsClient):
         reconnect_attempts = 0
         subscription_task = None
         
-        # Public: Dynamic subscription manager
         if self.subscription_scope == "public":
             subscription_task = asyncio.create_task(self._maintain_subscriptions())
         else:
-            # Private: Trigger immediate connection
             self._reconnect_event.set()
 
         while self._is_running.is_set():
             try:
                 await self._reconnect_event.wait()
                 self._reconnect_event.clear()
-
                 batch_task = asyncio.create_task(self._process_message_batch())
-                await batch_task  # Awaits until the connection is lost.
-
+                await batch_task
                 reconnect_attempts = 0
             except asyncio.CancelledError:
                 break
             except Exception:
                 log.exception(f"[{self.exchange_name}] Supervisor error.")
-
             if self._is_running.is_set():
                 reconnect_attempts += 1
                 delay = min(2**reconnect_attempts, 60)
@@ -245,7 +218,6 @@ class DeribitWsClient(AbstractWsClient):
         log.info(f"[{self.exchange_name}][{self.subscription_scope}] Supervisor loop has shut down.")
 
     async def _get_channels_from_universe(self, universe: list[str]) -> set[str]:
-        # Private client does not need universe mapping
         return set()
 
     async def close(self):
