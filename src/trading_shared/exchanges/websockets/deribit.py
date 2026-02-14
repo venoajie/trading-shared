@@ -1,4 +1,3 @@
-
 # src/trading_shared/exchanges/websockets/deribit.py
 
 # --- Built Ins ---
@@ -59,7 +58,6 @@ class DeribitWsClient(AbstractWsClient):
     async def _send_rpc(self, method: str, params: dict) -> Any:
         """
         Sends an RPC request and waits for the response.
-        Relies on the main read loop to resolve the future.
         """
         if not self._ws:
             raise ConnectionError(f"[{self.exchange_name}] Cannot send RPC: No active connection.")
@@ -71,6 +69,9 @@ class DeribitWsClient(AbstractWsClient):
         self._rpc_tracker[rpc_id] = future
 
         try:
+            # We use json.dumps for logging to easily mask secrets if needed, 
+            # but send using orjson if performance was critical. 
+            # For RPC control messages, standard json is safer for type compatibility.
             payload_str = json.dumps(msg)
             safe_params = {k: ("***" if "secret" in k.lower() else v) for k, v in params.items()}
             log.debug(f"[{self.exchange_name}] >>> RPC SEND | ID: {rpc_id} | Method: {method} | Params: {safe_params}")
@@ -87,7 +88,6 @@ class DeribitWsClient(AbstractWsClient):
     async def _handle_subscriptions(self):
         """
         Performs the Auth -> Subscribe sequence.
-        Must run concurrently with the read loop.
         """
         try:
             if self.subscription_scope == "private":
@@ -98,7 +98,8 @@ class DeribitWsClient(AbstractWsClient):
                     "client_secret": self.settings.client_secret.get_secret_value(),
                 }
                 auth_result = await self._send_rpc("public/auth", auth_params)
-                log.success(f"[{self.exchange_name}] Authentication successful. Access token expires in {auth_result.get('expires_in')}s.")
+                expires_in = auth_result.get('expires_in', 'unknown')
+                log.success(f"[{self.exchange_name}] Authentication successful. Access token expires in {expires_in}s.")
 
                 private_channels = ["user.changes.any.any.raw"]
                 log.info(f"[{self.exchange_name}] Subscribing to private channel: {private_channels[0]}")
@@ -128,6 +129,7 @@ class DeribitWsClient(AbstractWsClient):
                     try:
                         data = orjson.loads(raw_message)
 
+                        # 1. Handle RPC Responses
                         if (resp_id := data.get("id")) in self._rpc_tracker:
                             future = self._rpc_tracker[resp_id]
                             if "error" in data:
@@ -139,9 +141,8 @@ class DeribitWsClient(AbstractWsClient):
                                 future.set_result(result)
                             continue
 
+                        # 2. Handle Data Events
                         if (params := data.get("params", {})) and (channel := params.get("channel")):
-                            # [REFACTOR] For private scope, forward the *entire* raw message object
-                            # to adhere to the lossless ingestion mandate.
                             if self.subscription_scope == "private":
                                 log.info(f"[{self.exchange_name}] 📥 Private Event: {channel}")
                                 yield StreamMessage(
