@@ -16,10 +16,12 @@ class InstrumentRepository:
         self._db = db_client
 
     async def fetch_all(self) -> list[asyncpg.Record]:
-        return await self._db.fetch("SELECT * FROM v_instruments")
+        # FIXED: Query the base table 'instruments', not the non-existent 'v_instruments' view.
+        return await self._db.fetch("SELECT * FROM public.instruments")
 
     async def fetch_by_exchange(self, exchange_name: str) -> list[asyncpg.Record]:
-        query = "SELECT * FROM v_instruments WHERE exchange = $1"
+        # FIXED: Query the base table 'instruments', not the non-existent 'v_instruments' view.
+        query = "SELECT * FROM public.instruments WHERE exchange = $1"
         return await self._db.fetch(query, exchange_name)
 
     async def find_instrument_by_name_and_kind(self, exchange: str, canonical_name: str, instrument_kind: str) -> asyncpg.Record | None:
@@ -27,8 +29,9 @@ class InstrumentRepository:
         Finds a specific instrument record based on its canonical name and kind.
         e.g., Find the 'perpetual' instrument for the canonical name 'BTCUSDT'.
         """
+        # FIXED: Query the base table 'instruments', not the non-existent 'v_instruments' view.
         query = """
-            SELECT * FROM v_instruments
+            SELECT * FROM public.instruments
             WHERE exchange = $1
             AND instrument_name = $2
             AND instrument_kind = $3

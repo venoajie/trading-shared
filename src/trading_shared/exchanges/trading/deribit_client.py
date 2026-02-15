@@ -60,6 +60,7 @@ class DeribitTradingClient:
                     await self.login()
                     log.info(f"Re-authentication successful. Retrying call to '{func.__name__}'.")
                     return await func(self, *args, **kwargs)
+
         return wrapper
 
     # --- Connection and Auth ---
@@ -77,7 +78,7 @@ class DeribitTradingClient:
     async def login(self):
         if not self._session:
             raise ConnectionError("Session not established. Call connect() first.")
-        
+
         auth_params = {
             "grant_type": "client_credentials",
             "client_id": self._get_secret_value(self._client_id),
@@ -117,13 +118,13 @@ class DeribitTradingClient:
             data = await response.json()
             if response.status == 400 and data.get("error", {}).get("code") == 13009:
                 raise TokenExpiredError(f"Token expired for method {method}")
-            
+
             response.raise_for_status()
 
             if "error" in data:
                 log.error(f"Deribit API Error for method {method}: {data['error']}")
                 return {"success": False, "error": data["error"]}
-            
+
             return {"success": True, "data": data.get("result")}
 
     # --- API Methods ---
@@ -140,7 +141,7 @@ class DeribitTradingClient:
     @_ensure_authenticated
     async def sell(self, **params) -> dict[str, Any]:
         return await self._perform_request(ApiMethods.SELL, params)
-    
+
     @_ensure_authenticated
     async def edit(self, **params) -> dict[str, Any]:
         return await self._perform_request(ApiMethods.EDIT, params)
