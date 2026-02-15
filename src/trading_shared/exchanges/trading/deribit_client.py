@@ -1,4 +1,4 @@
-# src\trading_shared\exchanges\trading\deribit_client.py
+# src/trading_shared/exchanges/trading/deribit_client.py
 
 # --- Built Ins  ---
 import asyncio
@@ -14,7 +14,6 @@ from pydantic import SecretStr
 
 # --- Local Application Imports ---
 from ...config.models import ExchangeSettings
-from ...notifications.manager import NotificationManager
 from .deribit_constants import ApiMethods
 
 
@@ -25,20 +24,18 @@ class TokenExpiredError(Exception):
 class DeribitTradingClient:
     """
     An API client for private, authenticated Deribit trading endpoints.
+    Handles authentication, token expiry, and basic request signing.
     """
 
     def __init__(
         self,
         settings: ExchangeSettings,
-        client_id: str,
+        client_id: str | SecretStr,
         client_secret: str | SecretStr,
-        notification_manager: NotificationManager | None = None,
     ):
-        # Store credentials without assumption of type.
         self._client_id = client_id
         self._client_secret = client_secret
         self._settings = settings
-        self.notification_manager = notification_manager
         self.exchange_name = "deribit"
         self._session: aiohttp.ClientSession | None = None
         self._base_url = self._settings.rest_url + "/api/v2" if self._settings.rest_url else "https://www.deribit.com/api/v2"
@@ -63,11 +60,9 @@ class DeribitTradingClient:
                     await self.login()
                     log.info(f"Re-authentication successful. Retrying call to '{func.__name__}'.")
                     return await func(self, *args, **kwargs)
-
         return wrapper
 
-    # --- CORE CONNECTION AND AUTH METHODS (NOT DECORATED) ---
-
+    # --- Connection and Auth ---
     async def connect(self):
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(json_serialize=lambda data: orjson.dumps(data).decode())
@@ -82,10 +77,10 @@ class DeribitTradingClient:
     async def login(self):
         if not self._session:
             raise ConnectionError("Session not established. Call connect() first.")
-
+        
         auth_params = {
             "grant_type": "client_credentials",
-            "client_id": (self._client_id),
+            "client_id": self._get_secret_value(self._client_id),
             "client_secret": self._get_secret_value(self._client_secret),
         }
         url = f"{self._base_url}/public/auth"
@@ -96,15 +91,13 @@ class DeribitTradingClient:
                 data = await response.json()
                 if "result" in data and "access_token" in data["result"]:
                     self._access_token = data["result"]["access_token"]
-                    log.success("Successfully authenticated with Deribit and obtained access token.")
+                    log.success("Successfully authenticated with Deribit.")
                 else:
                     log.error(f"Deribit authentication failed: {data.get('error', 'Unknown error')}")
                     self._access_token = None
         except aiohttp.ClientError as e:
             log.critical(f"HTTP error during authentication: {e}")
             self._access_token = None
-
-    # --- SINGLE, ROBUST INTERNAL REQUEST METHOD ---
 
     async def _perform_request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         if not method.startswith("public/") and not self._access_token:
@@ -124,177 +117,56 @@ class DeribitTradingClient:
             data = await response.json()
             if response.status == 400 and data.get("error", {}).get("code") == 13009:
                 raise TokenExpiredError(f"Token expired for method {method}")
-
+            
             response.raise_for_status()
 
             if "error" in data:
                 log.error(f"Deribit API Error for method {method}: {data['error']}")
                 return {"success": False, "error": data["error"]}
-
+            
             return {"success": True, "data": data.get("result")}
 
-    # --- PUBLIC API METHODS (DECORATED) ---
-
-    async def get_instruments(self, currency: str, kind: str = "future", expired: bool = False) -> dict[str, Any]:
-        log.info(f"[API CALL] Fetching {kind} instruments for currency: {currency}")
-        return await self._perform_request(
-            ApiMethods.GET_INSTRUMENTS,
-            {"currency": currency, "kind": kind, "expired": expired},
-        )
-
-    async def get_tradingview_chart_data(
-        self,
-        instrument_name: str,
-        start_timestamp: int,
-        end_timestamp: int,
-        resolution: str,
-    ) -> dict[str, Any]:
-        """Fetches OHLC data from the TradingView-compatible endpoint."""
-        params = {
-            "instrument_name": instrument_name,
-            "start_timestamp": start_timestamp,
-            "end_timestamp": end_timestamp,
-            "resolution": resolution,
-        }
-        return await self._perform_request(ApiMethods.GET_TRADINGVIEW_CHART_DATA, params)
+    # --- API Methods ---
 
     @_ensure_authenticated
-    async def get_subaccounts_details(
-        self,
-        currency: str,
-    ) -> dict[str, Any]:
-        """Fetches detailed subaccount information."""
-        log.info(f"[API CALL] Fetching subaccount details for currency: {currency}")
-        params = {"currency": currency, "with_open_orders": True}
-        return await self._perform_request(ApiMethods.GET_SUBACCOUNTS_DETAILS, params)
+    async def get_positions(self, currency: str) -> dict[str, Any]:
+        log.info(f"[API CALL] Fetching positions for currency: {currency}")
+        return await self._perform_request(ApiMethods.GET_POSITIONS, {"currency": currency})
 
     @_ensure_authenticated
-    async def cancel_order(self, order_id: str) -> dict[str, Any]:
+    async def buy(self, **params) -> dict[str, Any]:
+        return await self._perform_request(ApiMethods.BUY, params)
+
+    @_ensure_authenticated
+    async def sell(self, **params) -> dict[str, Any]:
+        return await self._perform_request(ApiMethods.SELL, params)
+    
+    @_ensure_authenticated
+    async def edit(self, **params) -> dict[str, Any]:
+        return await self._perform_request(ApiMethods.EDIT, params)
+
+    @_ensure_authenticated
+    async def cancel(self, order_id: str) -> dict[str, Any]:
         log.info(f"[API CALL] Attempting to cancel order: {order_id}")
-        return await self._perform_request(ApiMethods.CANCEL_ORDER, {"order_id": order_id})
+        return await self._perform_request(ApiMethods.CANCEL, {"order_id": order_id})
 
     @_ensure_authenticated
-    async def create_order(
-        self,
-        params: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Sends a real 'create order' request to the exchange."""
-        # ... (implementation is the same, but calls _perform_request) ...
-        side = params.get("side")
-        endpoint = f"private/{side}"
-        payload_params = params.copy()
-        payload_params.pop("side", None)
-        payload_params.pop("cycle_id", None)
-        return await self._perform_request(endpoint, payload_params)
-
-    @_ensure_authenticated
-    async def create_oto_order(
-        self,
-        params: dict[str, Any],
-    ) -> dict[str, Any]:
-        """
-        Sends a request to create a paired OTO (One-Triggers-Other) order.
-        """
-        client_order_id = params.get("label")
-        log.info(f"[API CALL] Attempting to create OTO order with client_id: {client_order_id}")
-
-        side = params.get("side")
-        if not side:
-            return {
-                "success": False,
-                "error": "Missing 'side' parameter for create_oto_order",
-            }
-
-        payload_params = params.copy()
-        payload_params.pop("side", None)
-        payload_params.pop("cycle_id", None)
-
-        endpoint = f"private/{side}"
-
-        response = await self._perform_request(endpoint, payload_params)
-
-        if response.get("success"):
-            log.success(f"[API RESPONSE] Successfully processed OTO create for order: {client_order_id}.")
-        else:
-            log.error(f"[API RESPONSE] Failed to create OTO order for {client_order_id}. Error: {response.get('error')}")
-        return response
-
-    @_ensure_authenticated
-    async def get_open_orders_by_currency(
-        self,
-        currency: str,
-    ) -> dict[str, Any]:
-        """Fetches all open orders for a given currency."""
+    async def get_open_orders_by_currency(self, currency: str) -> dict[str, Any]:
         log.info(f"[API CALL] Fetching open orders for currency: {currency}")
-
         return await self._perform_request(ApiMethods.GET_OPEN_ORDERS_BY_CURRENCY, {"currency": currency})
 
     @_ensure_authenticated
-    async def get_account_summary(
-        self,
-        currency: str,
-    ) -> dict[str, Any] | None:
-        """Fetches account summary, including equity. Unwraps the response object."""
+    async def get_account_summary(self, currency: str) -> dict[str, Any] | None:
         log.info(f"[API CALL] Fetching account summary for currency: {currency}")
-
         response = await self._perform_request(ApiMethods.GET_ACCOUNT_SUMMARY, {"currency": currency})
-
-        if response and response.get("success"):
-            return response.get("data")
-
-        # If the request failed or was unsuccessful, return None
-        return None
+        return response.get("data") if response.get("success") else None
 
     @_ensure_authenticated
-    async def get_transaction_log(
-        self,
-        currency: str,
-        start_timestamp: int,
-        end_timestamp: int,
-        count: int = 1000,
-        query: str = "trade",
-        continuation: str = None,
-    ) -> dict[str, Any]:
-        """Fetches the transaction log for a given period."""
-        log.info(f"[API CALL] Fetching transaction log for {currency} from {start_timestamp} to {end_timestamp}")
-        params = {
-            "currency": currency,
-            "start_timestamp": start_timestamp,
-            "end_timestamp": end_timestamp,
-            "count": count,
-            "query": query,
-        }
-        if continuation:
-            params["continuation"] = continuation
-
-        return await self._perform_request(
-            ApiMethods.GET_TRANSACTION_LOG,
-            params,
-        )
-
-    @_ensure_authenticated
-    async def get_user_trades_by_order(
-        self,
-        order_id: str,
-    ) -> dict[str, Any]:
-        """Fetches user trades for a specific order ID."""
-        log.debug(f"[API CALL] Fetching trades for order_id: {order_id}")
-
-        return await self._perform_request(ApiMethods.GET_USER_TRADES_BY_ORDER, {"order_id": order_id})
-
-    @_ensure_authenticated
-    async def simulate_pme(
-        self,
-        positions: dict[str, float],
-    ) -> dict[str, Any]:
-        """
-        Calls the private/pme/simulate endpoint to get official margin calculations.
-        """
+    async def simulate_pme(self, positions: dict[str, float]) -> dict[str, Any]:
         log.info(f"[API CALL] Simulating PME for portfolio with {len(positions)} positions.")
         params = {
             "currency": "CROSS",
             "add_positions": True,
             "simulated_positions": positions,
         }
-
         return await self._perform_request(ApiMethods.SIMULATE_PME, params)
