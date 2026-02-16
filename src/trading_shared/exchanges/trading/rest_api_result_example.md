@@ -1928,3 +1928,457 @@ x-frame-options: SAMEORIGIN
   "usDiff": 10050,
   "testnet": false
 }
+
+https://www.deribit.com/api/v2/private/get_subaccounts?with_portfolio=true
+access-control-allow-headers: Authorization,User-Agent,Range,X-Requested-With,Content-Type,Partner
+access-control-allow-methods: GET, POST, OPTIONS
+access-control-allow-origin: *
+cache-control: no-store
+cf-cache-status: DYNAMIC
+cf-ray: 9ce94a69deeaa3e3-SIN
+content-encoding: gzip
+content-length: 1111
+content-type: application/json
+date: Mon, 16 Feb 2026 01:32:21 GMT
+server: cloudflare
+strict-transport-security: max-age=15768000
+vary: Origin,Authorization,Partner, accept-encoding
+x-frame-options: SAMEORIGIN
+--------------------------------------------------------------------------------
+{
+  "jsonrpc": "2.0",
+  "result": [
+    {
+      "id": 147691,
+      "type": "main",
+      "margin_model": "cross_sm",
+      "username": "MwaHaHa2020",
+      "email": "ven.ajie@protonmail.com",
+      "receive_notifications": false,
+      "system_name": "MwaHaHa2020",
+      "trading_products_details": [
+        {
+          "enabled": true,
+          "product": "perpetual",
+          "overwriteable": false,
+          "requires_consent": false
+        },
+        {
+          "enabled": true,
+          "product": "futures",
+          "overwriteable": false,
+          "requires_consent": false
+        },
+        {
+          "enabled": true,
+          "product": "options",
+          "overwriteable": false,
+          "requires_consent": false
+        },
+        {
+          "enabled": true,
+          "product": "future_combos",
+          "overwriteable": false,
+          "requires_consent": false
+        },
+        {
+          "enabled": true,
+          "product": "option_combos",
+          "overwriteable": false,
+          "requires_consent": false
+        },
+        {
+          "enabled": true,
+          "product": "spots",
+          "overwriteable": false,
+          "requires_consent": false
+        }
+      ],
+      "referrals_count": 0
+    },
+    {
+      "id": 148510,
+      "type": "subaccount",
+      "margin_model": "cross_pm",
+      "username": "MwaHaHa2020_1",
+      "email": "ven.ajie@protonmail.com",
+      "portfolio": {
+        "bnb": {
+          "balance": 0,
+          "currency": "bnb",
+          "locked_balance": 0,
+          "margin_balance": 0,
+          "equity": 0,
+          "maintenance_margin": 0,
+          "initial_margin": 0,
+          "available_funds": 0,
+          "available_withdrawal_funds": 0,
+          "spot_reserve": 0,
+          "additional_reserve": 0
+        },
+        "btc": {
+          "balance": 0.0000348,
+          "currency": "btc",
+          "locked_balance": 0,
+          "margin_balance": 0.00003685,
+          "equity": 0.0000348,
+          "maintenance_margin": 0.00000665,
+          "initial_margin": 0.00001023,
+          "available_funds": 0.00002662,
+          "available_withdrawal_funds": 0,
+          "spot_reserve": 0,
+          "additional_reserve": 0
+        },
+        "buidl": {
+          "balance": 0,
+          "currency": "buidl",
+          "locked_balance": 0,
+          "margin_balance": 2.531136,
+          "equity": 0,
+          "maintenance_margin": 0.456891,
+          "initial_margin": 0.70271,
+          "available_funds": 1.828426,
+          "available_withdrawal_funds": 0,
+          "spot_reserve": 0,
+          "additional_reserve": 0
+        },
+        "eth": {
+          "balance": 0.000031,
+          "currency": "eth",
+          "locked_balance": 0,
+          "margin_balance": 0.001287,
+          "equity": 0.000001,
+          "maintenance_margin": 0.000232,
+          "initial_margin": 0.000357,
+          "available_funds": 0.00093,
+          "available_withdrawal_funds": 0,
+          "spot_reserve": 0,
+          "additional_reserve": 0
+        },
+        "eurr": {
+          "balance": 0,
+          "currency": "eurr",
+          "locked_balance": 0,
+          "margin_balance": 0,
+          "equity": 0,
+          "maintenance_margin": 0,
+          "initial_margin": 0,
+          "available_funds": 0,
+          "available_withdrawal_funds": 0,
+          "spot_reserve": 0,
+          "additional_reserve": 0
+        },
+        "matic": {
+          "balance": 0,
+          "currency": "matic",
+          "locked_balance": 0,
+          "margin_balance": 0,
+          "equity": 0,
+          "maintenance_margin": 0,
+          "initial_margin": 0,
+          "available_funds": 0,
+          "available_withdrawal_funds": 0,
+          "spot_reserve": 0,
+          "additional_reserve": 0
+        },
+        "paxg": {
+          "balance": 0,
+          "currency": "paxg",
+          "locked_balance": 0,
+          "margin_balance": 0.000503,
+          "equity": 0,
+          "maintenance_margin": 0.000091,
+          "initial_margin": 0.00014,
+          "available_funds": 0.000364,
+          "available_withdrawal_funds": 0,
+          "spot_reserve": 0,
+          "additional_reserve": 0
+        },
+        "sol": {
+          "balance": 0,
+          "currency": "sol",
+          "locked_balance": 0,
+          "margin_balance": 0.02940685,
+          "equity": 0,
+          "maintenance_margin": 0.00530835,
+          "initial_margin": 0.0081644,
+          "available_funds": 0.02124245,
+          "available_withdrawal_funds": 0,
+          "spot_reserve": 0,
+          "additional_reserve": 0
+        },
+        "steth": {
+          "balance": 0,
+          "currency": "steth",
+          "locked_balance": 0,
+          "margin_balance": 0.001288,
+          "equity": 0,
+          "maintenance_margin": 0.000232,
+          "initial_margin": 0.000358,
+          "available_funds": 0.00093,
+          "available_withdrawal_funds": 0,
+          "spot_reserve": 0,
+          "additional_reserve": 0
+        },
+        "usdc": {
+          "balance": 0.01393577,
+          "currency": "usdc",
+          "locked_balance": 0,
+          "margin_balance": 2.53095382,
+          "equity": 0.13802577,
+          "maintenance_margin": 0.4568915,
+          "initial_margin": 0.70271283,
+          "available_funds": 1.82824099,
+          "available_withdrawal_funds": 0.00004886,
+          "spot_reserve": 0,
+          "additional_reserve": 0
+        },
+        "usde": {
+          "balance": 0,
+          "currency": "usde",
+          "locked_balance": 0,
+          "margin_balance": 2.533416,
+          "equity": 0,
+          "maintenance_margin": 0.457303,
+          "initial_margin": 0.703343,
+          "available_funds": 1.830073,
+          "available_withdrawal_funds": 0,
+          "spot_reserve": 0,
+          "additional_reserve": 0
+        },
+        "usdt": {
+          "balance": 0,
+          "currency": "usdt",
+          "locked_balance": 0,
+          "margin_balance": 2.532148,
+          "equity": 0,
+          "maintenance_margin": 0.457074,
+          "initial_margin": 0.702991,
+          "available_funds": 1.829157,
+          "available_withdrawal_funds": 0,
+          "spot_reserve": 0,
+          "additional_reserve": 0
+        },
+        "usyc": {
+          "balance": 0,
+          "currency": "usyc",
+          "locked_balance": 0,
+          "margin_balance": 2.267478,
+          "equity": 0,
+          "maintenance_margin": 0.409299,
+          "initial_margin": 0.629512,
+          "available_funds": 1.637966,
+          "available_withdrawal_funds": 0,
+          "spot_reserve": 0,
+          "additional_reserve": 0
+        },
+        "xrp": {
+          "balance": 0,
+          "currency": "xrp",
+          "locked_balance": 0,
+          "margin_balance": 0,
+          "equity": 0,
+          "maintenance_margin": 0,
+          "initial_margin": 0,
+          "available_funds": 0,
+          "available_withdrawal_funds": 0,
+          "spot_reserve": 0,
+          "additional_reserve": 0
+        },
+        "ethw": {
+          "balance": 0,
+          "currency": "ethw",
+          "locked_balance": 0,
+          "margin_balance": 0,
+          "equity": 0,
+          "maintenance_margin": 0,
+          "initial_margin": 0,
+          "available_funds": 0,
+          "available_withdrawal_funds": 0,
+          "spot_reserve": 0,
+          "additional_reserve": 0
+        }
+      },
+      "disabled_trading_products": [],
+      "is_password": false,
+      "login_enabled": false,
+      "proof_id": "UtLdeiQUo0fc44Uoe7s4jtBcqng",
+      "proof_id_signature": "Z3VlV_oRH0I9okwS6sSMdH0q8t7kTqnxhZRxg-KuGKztIlG7ULGyEr7Lpwqi3X0Kmvmv_X-cK4FUsQjL1K0qCg",
+      "receive_notifications": false,
+      "security_keys_assignments": [
+        "account",
+        "login",
+        "wallet"
+      ],
+      "security_keys_enabled": true,
+      "system_name": "MwaHaHa2020_1",
+      "trading_products_details": [
+        {
+          "enabled": true,
+          "product": "perpetual",
+          "overwriteable": true,
+          "requires_consent": false
+        },
+        {
+          "enabled": true,
+          "product": "futures",
+          "overwriteable": true,
+          "requires_consent": false
+        },
+        {
+          "enabled": true,
+          "product": "options",
+          "overwriteable": true,
+          "requires_consent": false
+        },
+        {
+          "enabled": true,
+          "product": "future_combos",
+          "overwriteable": true,
+          "requires_consent": false
+        },
+        {
+          "enabled": true,
+          "product": "option_combos",
+          "overwriteable": true,
+          "requires_consent": false
+        },
+        {
+          "enabled": true,
+          "product": "spots",
+          "overwriteable": true,
+          "requires_consent": false
+        }
+      ],
+      "referrals_count": 0
+    }
+  ],
+  "usIn": 1771205541508519,
+  "usOut": 1771205541513845,
+  "usDiff": 5326,
+  "testnet": false
+}
+
+{
+  "method": "private/get_subaccounts_details",
+  "params": {
+    "currency": "ETH",
+    "with_open_orders": true
+  },
+  "jsonrpc": "2.0",
+  "id": 4
+}
+
+access-control-allow-headers: Authorization,User-Agent,Range,X-Requested-With,Content-Type,Partner
+access-control-allow-methods: GET, POST, OPTIONS
+access-control-allow-origin: https://www.deribit.com
+cache-control: no-store
+cf-cache-status: DYNAMIC
+cf-ray: 9ce94cfe4fe844a7-SIN
+content-encoding: gzip
+content-length: 748
+content-type: application/json
+date: Mon, 16 Feb 2026 01:34:07 GMT
+server: cloudflare
+strict-transport-security: max-age=15768000
+vary: Origin,Authorization,Partner, accept-encoding
+x-frame-options: SAMEORIGIN
+--------------------------------------------------------------------------------
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "result": [
+    {
+      "uid": 148510,
+      "open_orders": [
+        {
+          "label": "test-123",
+          "price": 1000,
+          "user_id": 148510,
+          "amount": 1,
+          "direction": "buy",
+          "time_in_force": "good_til_day",
+          "instrument_name": "ETH-PERPETUAL",
+          "web": false,
+          "api": true,
+          "order_id": "ETH-109559973994",
+          "creation_timestamp": 1771198618609,
+          "replaced": false,
+          "filled_amount": 0,
+          "last_update_timestamp": 1771198618609,
+          "trigger_fill_condition": "incremental",
+          "post_only": true,
+          "reduce_only": false,
+          "average_price": 0,
+          "mmp": false,
+          "contracts": 1,
+          "reject_post_only": false,
+          "order_state": "open",
+          "order_type": "limit",
+          "is_liquidation": false,
+          "risk_reducing": false,
+          "oto_order_ids": [
+            "ETH-OTO-6910166"
+          ]
+        },
+        {
+          "label": "test-123",
+          "price": 2000,
+          "user_id": 148510,
+          "amount": 1,
+          "direction": "sell",
+          "time_in_force": "good_til_cancelled",
+          "instrument_name": "ETH-PERPETUAL",
+          "web": false,
+          "api": true,
+          "order_id": "ETH-OTO-6910166",
+          "triggered": false,
+          "creation_timestamp": 1771198618604,
+          "is_secondary_oto": true,
+          "replaced": false,
+          "trigger": "last_price",
+          "trigger_price": 999,
+          "filled_amount": 0,
+          "last_update_timestamp": 1771198618604,
+          "trigger_fill_condition": "incremental",
+          "post_only": true,
+          "reduce_only": true,
+          "mmp": false,
+          "reject_post_only": false,
+          "order_state": "untriggered",
+          "order_type": "take_limit",
+          "is_liquidation": false,
+          "risk_reducing": false
+        }
+      ],
+      "positions": [
+        {
+          "size": 1,
+          "kind": "future",
+          "settlement_price": 2090.99,
+          "maintenance_margin": 0.000005093,
+          "initial_margin": 0.000010187,
+          "open_orders_margin": 0.0000309,
+          "direction": "buy",
+          "index_price": 1963.1,
+          "instrument_name": "ETH-PERPETUAL",
+          "mark_price": 1963.31,
+          "interest_value": 0.14378579427770194,
+          "delta": 0.000509344,
+          "average_price": 2074.25,
+          "floating_profit_loss": -0.000031102,
+          "realized_profit_loss": -5e-9,
+          "total_profit_loss": -0.000027242,
+          "realized_funding": 0,
+          "leverage": 50,
+          "size_currency": 0.000509344,
+          "estimated_liquidation_price": null
+        }
+      ]
+    }
+  ],
+  "usIn": 1771205647228111,
+  "usOut": 1771205647230213,
+  "usDiff": 2102,
+  "testnet": false
+}

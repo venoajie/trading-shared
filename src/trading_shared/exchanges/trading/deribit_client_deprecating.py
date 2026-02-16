@@ -14,7 +14,7 @@ from pydantic import SecretStr
 
 # --- Local Application Imports ---
 from ...config.models import ExchangeSettings
-from .deribit_constants import ApiMethods
+from .deribit_constants_deprecating import ApiMethods
 
 
 class TokenExpiredError(Exception):
