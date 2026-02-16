@@ -25,10 +25,6 @@ class MarketDataRepository:
         messages: list[StreamMessage] | deque[StreamMessage],
         maxlen: int = 10000,
     ):
-        """
-        Publishes messages to a Redis stream.
-        Strictly enforces the canonical {'payload': json_string} format.
-        """
         if not messages:
             return
 
@@ -42,6 +38,7 @@ class MarketDataRepository:
 
     async def cache_ticker(self, exchange: str, symbol: str, data: dict[str, Any], ttl_seconds: int = 5400):
         """Caches ticker data with a 90-minute TTL using the canonical key schema."""
+        # SCHEMA: market:cache:{exchange}:ticker:{symbol}
         redis_key = f"market:cache:{exchange.lower()}:ticker:{symbol.upper()}"
         try:
             payload_str = orjson.dumps(data)
@@ -52,8 +49,13 @@ class MarketDataRepository:
         except Exception:
             log.exception(f"Failed to cache ticker for {symbol}")
 
-    async def get_ticker_data(self, instrument_name: str) -> dict[str, Any] | None:
-        key = f"ticker:{instrument_name.upper()}"
+    async def get_ticker_data(self, exchange: str, instrument_name: str) -> dict[str, Any] | None:
+        """
+        Retrieves ticker data using the canonical schema.
+        [FIX] Now requires 'exchange' to construct the correct key.
+        """
+        # SCHEMA: market:cache:{exchange}:ticker:{symbol}
+        key = f"market:cache:{exchange.lower()}:ticker:{instrument_name.upper()}"
         try:
             payload = await self._redis.hget(key, "payload")
             if not payload:
@@ -64,10 +66,6 @@ class MarketDataRepository:
             return None
 
     async def update_realtime_candle(self, exchange: str, instrument_name: str, candle_data: dict):
-        """
-        Updates the 'Hot' OHLC candle in Redis.
-        CRITICAL FIX: TTL extended to 60s to resolve race condition with Analyzer (15s loop).
-        """
         key = f"market:cache:{exchange.lower()}:ohlc:live:{instrument_name.upper()}"
         mapping = {
             "tick": str(candle_data["tick"]),
@@ -84,8 +82,6 @@ class MarketDataRepository:
         try:
             pipe = await self._redis.pipeline()
             await pipe.hset(name=key, mapping=mapping)
-            # [FIX] TTL Increased 5s -> 60s. Analyzer runs every 15s.
-            # 5s TTL guarantees data loss if Analyzer checks at T+6s.
             await pipe.expire(key, 60)
             await pipe.execute()
         except Exception:
@@ -97,10 +93,8 @@ class MarketDataRepository:
     async def get_realtime_candle(self, exchange: str, instrument_name: str) -> dict[str, Any] | None:
         key = f"market:cache:{exchange.lower()}:ohlc:live:{instrument_name.upper()}"
         data = await self._redis.hgetall(key)
-
         if not data:
             return None
-
         try:
             return {
                 "tick": int(data[b"tick"]),
@@ -133,7 +127,6 @@ class MarketDataRepository:
         data = await self._redis.hgetall(key)
         if not data:
             return None
-
         decoded = {}
         for k, v in data.items():
             key_str = k.decode("utf-8")

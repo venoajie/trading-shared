@@ -5,7 +5,7 @@ import asyncio
 import json
 import time
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import Any, List, Set
 
 # --- Installed ---
 import orjson
@@ -102,10 +102,10 @@ class DeribitWsClient(AbstractWsClient):
                 log.success(f"[{self.exchange_name}] Authentication successful. Access token expires in {expires_in}s.")
 
                 private_channels = [
-                    "user.changes.any.any.raw", # Orders and Trades
-                    "user.portfolio.any"        # Real-time Equity and Delta
+                    "user.changes.any.any.raw",  # Orders and Trades
+                    "user.portfolio.any",  # Real-time Equity and Delta
                 ]
-                
+
                 log.info(f"[{self.exchange_name}] Subscribing to private channel: {private_channels[0]}")
                 sub_result = await self._send_rpc("private/subscribe", {"channels": private_channels})
                 log.success(f"[{self.exchange_name}] Subscription to private channel confirmed: {sub_result}")
@@ -149,30 +149,27 @@ class DeribitWsClient(AbstractWsClient):
                         if (params := data.get("params", {})) and (channel := params.get("channel")):
                             if self.subscription_scope == "private":
                                 ts = int(time.time() * 1000)
-                                
+
                                 # --- COMPOSITE EVENT SPLITTING ---
                                 if channel == "user.changes.any.any.raw":
                                     payload_data = params.get("data", {})
-                                    label = params.get("label") # Capture label for context
+                                    label = params.get("label")  # Capture label for context
 
                                     # A. Extract ORDERS
                                     if orders := payload_data.get("orders"):
                                         log.info(f"[{self.exchange_name}] ✂️ Splitting {len(orders)} Orders from composite event.")
                                         yield StreamMessage(
                                             exchange=self.exchange_name,
-                                            channel="user.orders", # Synthetic channel name
+                                            channel="user.orders",  # Synthetic channel name
                                             timestamp=ts,
-                                            data={"orders": orders, "label": label}
+                                            data={"orders": orders, "label": label},
                                         )
 
                                     # B. Extract TRADES
                                     if trades := payload_data.get("trades"):
                                         log.info(f"[{self.exchange_name}] ✂️ Splitting {len(trades)} Trades from composite event.")
                                         yield StreamMessage(
-                                            exchange=self.exchange_name,
-                                            channel="user.trades",
-                                            timestamp=ts,
-                                            data={"trades": trades, "label": label}
+                                            exchange=self.exchange_name, channel="user.trades", timestamp=ts, data={"trades": trades, "label": label}
                                         )
 
                                     # C. Extract POSITIONS
@@ -182,9 +179,9 @@ class DeribitWsClient(AbstractWsClient):
                                             exchange=self.exchange_name,
                                             channel="user.positions",
                                             timestamp=ts,
-                                            data={"positions": positions, "label": label}
+                                            data={"positions": positions, "label": label},
                                         )
-                                
+
                                 # --- STANDARD EVENT PASSTHROUGH ---
                                 else:
                                     # e.g., user.portfolio.any
@@ -193,7 +190,7 @@ class DeribitWsClient(AbstractWsClient):
                                         exchange=self.exchange_name,
                                         channel=channel,
                                         timestamp=ts,
-                                        data=params, # Keep original structure for simple events
+                                        data=params,  # Keep original structure for simple events
                                     )
 
                             # 3. Public Trades (Fallback)
@@ -205,7 +202,7 @@ class DeribitWsClient(AbstractWsClient):
                                         timestamp=trade.get("timestamp"),
                                         data=trade,
                                     )
-                                    
+
                     except (orjson.JSONDecodeError, KeyError, TypeError) as e:
                         if "heartbeat" not in str(raw_message):
                             log.warning(f"[{self.exchange_name}] Error processing message: {e}")
@@ -219,7 +216,7 @@ class DeribitWsClient(AbstractWsClient):
                 if not future.done():
                     future.cancel()
             self._rpc_tracker.clear()
-            
+
     async def _process_message_batch(self):
         """Inner loop to consume messages and write them to the Redis stream."""
         try:
@@ -265,8 +262,33 @@ class DeribitWsClient(AbstractWsClient):
             subscription_task.cancel()
         log.info(f"[{self.exchange_name}][{self.subscription_scope}] Supervisor loop has shut down.")
 
-    async def _get_channels_from_universe(self, universe: list[str]) -> set[str]:
-        return set()
+    async def _get_channels_from_universe(self, universe: List[Any]) -> Set[str]:
+        """
+        Maps the active universe to Deribit ticker and trade channels.
+        Handles both dictionary-based universe (Janitor) and simple list[str].
+        """
+        channels = set()
+
+        for entry in universe:
+            symbol = None
+
+            # Handle Dictionary format (Standard Janitor)
+            if isinstance(entry, dict):
+                # Filter by exchange if present
+                if entry.get("exchange", "").lower() not in ["", "deribit"]:
+                    continue
+                symbol = entry.get("symbol") or entry.get("instrument_name")
+
+            # Handle String format (Legacy/Simple)
+            elif isinstance(entry, str):
+                symbol = entry
+
+            if symbol:
+                # Subscribe to Raw Tickers (for Price) and Raw Trades (for Volume)
+                channels.add(f"ticker.{symbol}.raw")
+                channels.add(f"trades.{symbol}.raw")
+
+        return channels
 
     async def close(self):
         log.warning(f"[{self.exchange_name}][{self.subscription_scope}] Closing client...")
