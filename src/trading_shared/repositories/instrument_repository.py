@@ -47,7 +47,6 @@ class InstrumentRepository:
         )
         log.info(f"Successfully bulk-upserted {len(instruments)} instruments for '{exchange_name}'.")
 
-
     async def get_furthest_active_future(self, currency: str) -> Optional[str]:
         """
         Finds the active future instrument with the furthest expiration date
