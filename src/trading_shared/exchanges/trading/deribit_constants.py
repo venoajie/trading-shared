@@ -1,4 +1,4 @@
-# src\shared_exchange_clients\trading\deribit\constants.py
+# src\trading_shared\exchanges\trading\deribit_constants.py
 
 """
 Static application constants

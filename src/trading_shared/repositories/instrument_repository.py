@@ -1,7 +1,7 @@
 # src/trading_shared/repositories/instrument_repository.py
 
 # --- Built Ins  ---
-from typing import Any
+from typing import Any, Optional
 
 # --- Installed  ---
 import asyncpg
@@ -16,11 +16,9 @@ class InstrumentRepository:
         self._db = db_client
 
     async def fetch_all(self) -> list[asyncpg.Record]:
-        # FIXED: Query the base table 'instruments', not the non-existent 'v_instruments' view.
         return await self._db.fetch("SELECT * FROM public.instruments")
 
     async def fetch_by_exchange(self, exchange_name: str) -> list[asyncpg.Record]:
-        # FIXED: Query the base table 'instruments', not the non-existent 'v_instruments' view.
         query = "SELECT * FROM public.instruments WHERE exchange = $1"
         return await self._db.fetch(query, exchange_name)
 
@@ -29,7 +27,6 @@ class InstrumentRepository:
         Finds a specific instrument record based on its canonical name and kind.
         e.g., Find the 'perpetual' instrument for the canonical name 'BTCUSDT'.
         """
-        # FIXED: Query the base table 'instruments', not the non-existent 'v_instruments' view.
         query = """
             SELECT * FROM public.instruments
             WHERE exchange = $1
@@ -49,3 +46,26 @@ class InstrumentRepository:
             instruments_with_exchange,
         )
         log.info(f"Successfully bulk-upserted {len(instruments)} instruments for '{exchange_name}'.")
+
+
+    async def get_furthest_active_future(self, currency: str) -> Optional[str]:
+        """
+        Finds the active future instrument with the furthest expiration date
+        for the given currency.
+        """
+        # Note: Deribit 'base_asset' is usually the currency code (BTC, ETH)
+        query = """
+            SELECT instrument_name 
+            FROM public.instruments 
+            WHERE base_asset = $1 
+              AND market_type = 'future' 
+              AND is_active = TRUE 
+            ORDER BY expiration_timestamp DESC 
+            LIMIT 1;
+        """
+        try:
+            record = await self.db_client.fetch_one(query, currency)
+            return record["instrument_name"] if record else None
+        except Exception:
+            # Fallback or logging handled by caller/wrapper
+            return None
