@@ -145,16 +145,58 @@ class DeribitWsClient(AbstractWsClient):
                                 future.set_result(result)
                             continue
 
-                        # 2. Handle Data Events
+                        # 2. Handle Private Data Events
                         if (params := data.get("params", {})) and (channel := params.get("channel")):
                             if self.subscription_scope == "private":
-                                log.info(f"[{self.exchange_name}] 📥 Private Event: {channel}")
-                                yield StreamMessage(
-                                    exchange=self.exchange_name,
-                                    channel=channel,
-                                    timestamp=int(time.time() * 1000),
-                                    data=data,  # Yield the full parsed JSON object
-                                )
+                                ts = int(time.time() * 1000)
+                                
+                                # --- COMPOSITE EVENT SPLITTING ---
+                                if channel == "user.changes.any.any.raw":
+                                    payload_data = params.get("data", {})
+                                    label = params.get("label") # Capture label for context
+
+                                    # A. Extract ORDERS
+                                    if orders := payload_data.get("orders"):
+                                        log.info(f"[{self.exchange_name}] ✂️ Splitting {len(orders)} Orders from composite event.")
+                                        yield StreamMessage(
+                                            exchange=self.exchange_name,
+                                            channel="user.orders", # Synthetic channel name
+                                            timestamp=ts,
+                                            data={"orders": orders, "label": label}
+                                        )
+
+                                    # B. Extract TRADES
+                                    if trades := payload_data.get("trades"):
+                                        log.info(f"[{self.exchange_name}] ✂️ Splitting {len(trades)} Trades from composite event.")
+                                        yield StreamMessage(
+                                            exchange=self.exchange_name,
+                                            channel="user.trades",
+                                            timestamp=ts,
+                                            data={"trades": trades, "label": label}
+                                        )
+
+                                    # C. Extract POSITIONS
+                                    if positions := payload_data.get("positions"):
+                                        log.info(f"[{self.exchange_name}] ✂️ Splitting {len(positions)} Positions from composite event.")
+                                        yield StreamMessage(
+                                            exchange=self.exchange_name,
+                                            channel="user.positions",
+                                            timestamp=ts,
+                                            data={"positions": positions, "label": label}
+                                        )
+                                
+                                # --- STANDARD EVENT PASSTHROUGH ---
+                                else:
+                                    # e.g., user.portfolio.any
+                                    log.info(f"[{self.exchange_name}] 📥 Private Event: {channel}")
+                                    yield StreamMessage(
+                                        exchange=self.exchange_name,
+                                        channel=channel,
+                                        timestamp=ts,
+                                        data=params, # Keep original structure for simple events
+                                    )
+
+                            # 3. Public Trades (Fallback)
                             elif "trades" in channel and (payload := params.get("data")):
                                 for trade in payload:
                                     yield StreamMessage(
@@ -163,6 +205,7 @@ class DeribitWsClient(AbstractWsClient):
                                         timestamp=trade.get("timestamp"),
                                         data=trade,
                                     )
+                                    
                     except (orjson.JSONDecodeError, KeyError, TypeError) as e:
                         if "heartbeat" not in str(raw_message):
                             log.warning(f"[{self.exchange_name}] Error processing message: {e}")
@@ -176,7 +219,7 @@ class DeribitWsClient(AbstractWsClient):
                 if not future.done():
                     future.cancel()
             self._rpc_tracker.clear()
-
+            
     async def _process_message_batch(self):
         """Inner loop to consume messages and write them to the Redis stream."""
         try:
