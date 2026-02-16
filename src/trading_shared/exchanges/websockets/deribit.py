@@ -101,7 +101,11 @@ class DeribitWsClient(AbstractWsClient):
                 expires_in = auth_result.get("expires_in", "unknown")
                 log.success(f"[{self.exchange_name}] Authentication successful. Access token expires in {expires_in}s.")
 
-                private_channels = ["user.changes.any.any.raw"]
+                private_channels = [
+                    "user.changes.any.any.raw", # Orders and Trades
+                    "user.portfolio.any"        # Real-time Equity and Delta
+                ]
+                
                 log.info(f"[{self.exchange_name}] Subscribing to private channel: {private_channels[0]}")
                 sub_result = await self._send_rpc("private/subscribe", {"channels": private_channels})
                 log.success(f"[{self.exchange_name}] Subscription to private channel confirmed: {sub_result}")
