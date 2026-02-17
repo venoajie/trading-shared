@@ -19,6 +19,42 @@ class MarketDataRepository:
     def __init__(self, redis_client: CustomRedisClient):
         self._redis = redis_client
 
+    async def update_ticker_data(self, exchange: str, instrument: str, ticker_data: dict[str, Any], ttl_seconds: int = 60):
+        """
+        Updates ticker data using a flat Hash structure in Redis.
+        This is the preferred method for high-frequency streaming updates.
+        SCHEMA: market:cache:{exchange}:ticker:{instrument}
+        """
+        redis_key = f"market:cache:{exchange.lower()}:ticker:{instrument.upper()}"
+        try:
+            # Ensure all values are strings for redis HSET
+            payload = {k: str(v) for k, v in ticker_data.items() if v is not None}
+            if not payload:
+                return
+
+            pipe = await self._redis.pipeline()
+            # Use HSET with mapping for modern redis-py
+            await pipe.hset(redis_key, mapping=payload)
+            await pipe.expire(redis_key, ttl_seconds)
+            await pipe.execute()
+        except Exception:
+            log.exception(f"Failed to update ticker hash for {instrument}")
+
+    async def get_ticker_data(self, exchange: str, instrument_name: str) -> dict[str, Any] | None:
+        """
+        Retrieves ticker data from a Redis Hash.
+        """
+        key = f"market:cache:{exchange.lower()}:ticker:{instrument_name.upper()}"
+        try:
+            # HGETALL returns bytes, so we need to decode them
+            data = await self._redis.hgetall(key)
+            if not data:
+                return None
+            return {k.decode("utf-8"): v.decode("utf-8") for k, v in data.items()}
+        except Exception as e:
+            log.error(f"Failed to decode ticker data for '{instrument_name}': {e}")
+            return None
+
     async def add_messages_to_stream(
         self,
         stream_name: str,
@@ -48,22 +84,6 @@ class MarketDataRepository:
             await pipe.execute()
         except Exception:
             log.exception(f"Failed to cache ticker for {symbol}")
-
-    async def get_ticker_data(self, exchange: str, instrument_name: str) -> dict[str, Any] | None:
-        """
-        Retrieves ticker data using the canonical schema.
-        [FIX] Now requires 'exchange' to construct the correct key.
-        """
-        # SCHEMA: market:cache:{exchange}:ticker:{symbol}
-        key = f"market:cache:{exchange.lower()}:ticker:{instrument_name.upper()}"
-        try:
-            payload = await self._redis.hget(key, "payload")
-            if not payload:
-                return None
-            return orjson.loads(payload)
-        except orjson.JSONDecodeError as e:
-            log.error(f"Failed to decode ticker data for '{instrument_name}': {e}")
-            return None
 
     async def update_realtime_candle(self, exchange: str, instrument_name: str, candle_data: dict):
         key = f"market:cache:{exchange.lower()}:ohlc:live:{instrument_name.upper()}"

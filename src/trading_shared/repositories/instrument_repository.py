@@ -1,7 +1,7 @@
 # src/trading_shared/repositories/instrument_repository.py
 
 # --- Built Ins  ---
-from typing import Any, Optional
+from typing import Any, Optional, List
 
 # --- Installed  ---
 import asyncpg
@@ -21,6 +21,27 @@ class InstrumentRepository:
     async def fetch_by_exchange(self, exchange_name: str) -> list[asyncpg.Record]:
         query = "SELECT * FROM public.instruments WHERE exchange = $1"
         return await self._db.fetch(query, exchange_name)
+
+    async def fetch_by_criteria(self, **kwargs: Any) -> List[asyncpg.Record]:
+        """
+        Dynamically fetches instruments based on a set of criteria.
+
+        Example: fetch_by_criteria(exchange='deribit', is_active=True)
+        """
+        base_query = "SELECT * FROM public.instruments"
+        conditions = []
+        params = []
+
+        for i, (key, value) in enumerate(kwargs.items()):
+            conditions.append(f"{key} = ${i + 1}")
+            params.append(value)
+
+        if conditions:
+            query = f"{base_query} WHERE {' AND '.join(conditions)}"
+        else:
+            query = base_query
+
+        return await self._db.fetch(query, *params)
 
     async def find_instrument_by_name_and_kind(self, exchange: str, canonical_name: str, instrument_kind: str) -> asyncpg.Record | None:
         """
@@ -63,7 +84,7 @@ class InstrumentRepository:
             LIMIT 1;
         """
         try:
-            record = await self.db_client.fetch_one(query, currency)
+            record = await self._db.fetchrow(query, currency)
             return record["instrument_name"] if record else None
         except Exception:
             # Fallback or logging handled by caller/wrapper
