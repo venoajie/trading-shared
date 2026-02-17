@@ -11,6 +11,7 @@ class ApiMethods:
     # Public
     GET_INSTRUMENTS = "public/get_instruments"
     GET_TRADINGVIEW_CHART_DATA = "public/get_tradingview_chart_data"
+    GET_INDEX_PRICE = "public/get_index_price"
 
     # --- Private (Trading) ---
     BUY = "private/buy"
