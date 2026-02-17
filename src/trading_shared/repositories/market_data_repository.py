@@ -178,3 +178,39 @@ class MarketDataRepository:
             return TakerMetrics.model_validate(decoded)
         except Exception:
             return None
+
+
+    async def update_index_data(self, exchange: str, index_name: str, index_data: dict[str, Any], ttl_seconds: int = 60):
+        """
+        Updates index price data (e.g., btc_usd) using a flat Hash structure.
+        SCHEMA: market:cache:{exchange}:index:{index_name}
+        """
+        # We lowercase the index_name to match common conventions (btc_usd)
+        redis_key = f"market:cache:{exchange.lower()}:index:{index_name.lower()}"
+        try:
+            # Ensure all values are strings for redis HSET
+            payload = {k: str(v) for k, v in index_data.items() if v is not None}
+            if not payload:
+                return
+
+            pipe = await self._redis.pipeline()
+            await pipe.hset(redis_key, mapping=payload)
+            await pipe.expire(redis_key, ttl_seconds)
+            await pipe.execute()
+            # log.debug(f"Updated index cache for {index_name}")
+        except Exception:
+            log.exception(f"Failed to update index hash for {index_name}")
+
+    async def get_index_data(self, exchange: str, index_name: str) -> dict[str, Any] | None:
+        """
+        Retrieves index price data from a Redis Hash.
+        """
+        key = f"market:cache:{exchange.lower()}:index:{index_name.lower()}"
+        try:
+            data = await self._redis.hgetall(key)
+            if not data:
+                return None
+            return {k.decode("utf-8"): v.decode("utf-8") for k, v in data.items()}
+        except Exception as e:
+            log.error(f"Failed to decode index data for '{index_name}': {e}")
+            return None
