@@ -179,7 +179,6 @@ class MarketDataRepository:
         except Exception:
             return None
 
-
     async def update_index_data(self, exchange: str, index_name: str, index_data: dict[str, Any], ttl_seconds: int = 60):
         """
         Updates index price data (e.g., btc_usd) using a flat Hash structure.

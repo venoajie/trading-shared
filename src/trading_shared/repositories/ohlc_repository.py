@@ -25,7 +25,7 @@ class OhlcRepository:
             else:
                 tick_dt = tick
 
-            # [FIX] Pass resolution as a string directly.
+            # Pass resolution as a string directly.
             # The DB expects VARCHAR/TEXT, not an INTERVAL/timedelta.
             resolution_str = str(candle_data.get("resolution") or "")
 
@@ -56,7 +56,7 @@ class OhlcRepository:
         """
         Fetches the timestamp of the most recent candle for a given instrument.
         """
-        # [FIX] Removed timedelta conversion. Passed raw string to DB.
+        # Passed raw string to DB.
         query = "SELECT MAX(tick) AS latest_tick FROM ohlc WHERE exchange = $1 AND instrument_name = $2 AND resolution = $3"
         try:
             # Ensure resolution is a string
@@ -77,7 +77,7 @@ class OhlcRepository:
         """
         Fetches the most recent N candles.
         """
-        # [FIX] Removed timedelta conversion. Passed raw string to DB.
+        # Passed raw string to DB.
         res_str = str(resolution)
         query = "SELECT * FROM ohlc WHERE exchange = $1 AND instrument_name = $2 AND resolution = $3 ORDER BY tick DESC LIMIT $4"
         return await self._db.fetch(query, exchange, instrument, res_str, limit)
@@ -93,9 +93,28 @@ class OhlcRepository:
             return
 
         try:
-            # Assumes 'bulk_upsert_ohlc' stored procedure exists in Postgres
-            # and accepts the tuple structure defined in _prepare_ohlc_record
+            # Aaccepts the tuple structure defined in _prepare_ohlc_record
             await self._db.execute("SELECT bulk_upsert_ohlc($1::ohlc_upsert_type[])", valid_records)
         except Exception as e:
             log.error(f"Bulk upsert failed: {e}")
             raise e
+
+    async def get_latest_candle(self, instrument: str, resolution: str) -> asyncpg.Record | None:
+        """
+        Fetches the single most recent OHLC candle for an instrument.
+        Used by agents to calculate volatility/spreads.
+        """
+
+        query = """
+            SELECT * FROM ohlc 
+            WHERE instrument_name = $1 
+              AND resolution = $2 
+            ORDER BY tick DESC 
+            LIMIT 1;
+        """
+        try:
+            # We use fetchrow because we only need the one latest point
+            return await self._db.fetchrow(query, instrument, str(resolution))
+        except Exception as e:
+            log.error(f"Failed to fetch latest candle for {instrument}: {e}")
+            return None
