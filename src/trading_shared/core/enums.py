@@ -28,8 +28,9 @@ class MarketType(str, Enum):
 class StorageMode(str, Enum):
     """Defines the authoritative storage backend for an asset's market data."""
 
-    PERSISTENT = "POSTGRES"
-    EPHEMERAL = "REDIS_BUFFER"
+    # PERSISTENT/EPHEMERAL should be consistent with init-db-v5.3.sh
+    PERSISTENT = "PERSISTENT"
+    EPHEMERAL = "EPHEMERAL"
     UNKNOWN = "UNKNOWN"
 
 
