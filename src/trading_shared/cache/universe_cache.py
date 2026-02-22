@@ -71,7 +71,7 @@ class UniverseCache:
         except Exception as e:
             log.error(f"UniverseCache refresh failed: {e}")
 
-    def _rebuild_canonical_map(self):
+    def _rebuild_canonical_map_deprecated(self):
         """Rebuilds map used by Distributor for symbol normalization."""
         mapping = {}
         # 1. Add Base Universe
@@ -87,6 +87,25 @@ class UniverseCache:
 
         self._raw_to_canonical_map = mapping
 
+    def _rebuild_canonical_map(self):
+        """
+        Builds O(1) Lookup Map.
+        Maps the EXACT Exchange string to the DB instrument_name.
+        """
+        mapping = {}
+        
+        # 1. Base Universe
+        for db_name, info in self._instrument_map.items():
+            # Safely extract the exact string the exchange transmits
+            raw_exchange_name = info.get("data", {}).get("instrument_name") or info.get("data", {}).get("symbol") or db_name
+            mapping[str(raw_exchange_name).strip().upper()] = db_name
+
+        # 2. Spotlight Overrides (Movers)
+        for name in self._overrides:
+            mapping[str(name).strip().upper()] = name
+
+        self._raw_to_canonical_map = mapping
+        
     async def get_storage_mode(self, instrument_name: str) -> StorageMode:
         """
         Determines storage mode.
