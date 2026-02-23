@@ -267,6 +267,12 @@ class SignalEvent(BaseModel):
     exchange: str
     signal_type: str
     strength: float
+
+    # Optional targeting for multi-account routing
+    # If None, it broadcasts to all eligible accounts.
+    # If specified (e.g., "sub_account_1"), only that account executes it.
+    target_account_id: str | None = None
+
     metadata: dict[str, Any]
 
 

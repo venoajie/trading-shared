@@ -93,7 +93,7 @@ class UniverseCache:
         Maps the EXACT Exchange string to the DB instrument_name.
         """
         mapping = {}
-        
+
         # 1. Base Universe
         for db_name, info in self._instrument_map.items():
             # Safely extract the exact string the exchange transmits
@@ -105,7 +105,7 @@ class UniverseCache:
             mapping[str(name).strip().upper()] = name
 
         self._raw_to_canonical_map = mapping
-        
+
     async def get_storage_mode(self, instrument_name: str) -> StorageMode:
         """
         Determines storage mode.
