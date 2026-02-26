@@ -110,21 +110,20 @@ class UniverseCache:
         """
         Determines storage mode.
         """
-        # If it's in the base map, respect its config
         if instrument_name in self._instrument_map:
-            base_mode = self._instrument_map[instrument_name].get("storage_mode")
-            # If it's ALSO a mover, we might upgrade it, but usually we stick to base
+
+            inst_data = self._instrument_map[instrument_name]
+            base_mode = inst_data.get("storage_tier") or inst_data.get("storage_mode")
+            
             if instrument_name in self._overrides:
                 return StorageMode.PERSISTENT
             return StorageMode(base_mode or StorageMode.EPHEMERAL.value)
 
-        # If it's ONLY in overrides (a temporary mover), keep it EPHEMERAL
-        # to avoid polluting the database with transient assets.
         if instrument_name in self._overrides:
             return StorageMode.EPHEMERAL
 
         return StorageMode.EPHEMERAL
-
+    
     def get_all_instruments(self) -> list[dict]:
         """
         Returns flat list for Analyzer loops.

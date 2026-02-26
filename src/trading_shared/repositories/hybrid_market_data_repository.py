@@ -34,7 +34,8 @@ class HybridMarketDataRepository:
         return await self._fetch_from_redis(exchange, symbol, lookback_minutes)
 
     async def _fetch_from_postgres(self, exchange: str, symbol: str, limit: int) -> list[dict]:
-        # FIXED: resolution = $3 (uses '1m', not '1')
+        """Fetches from PostgreSQL for assets with persistent storage."""
+        # FIX: Change resolution = '1' to resolution = '1m' to match the Distributor's write format
         query = """
         SELECT
             exchange, instrument_name, resolution,
@@ -42,17 +43,17 @@ class HybridMarketDataRepository:
             "open", high, low, "close", volume,
             taker_buy_volume, taker_sell_volume
         FROM ohlc
-        WHERE exchange = $1 AND instrument_name = $2 AND resolution = $3
-        ORDER BY tick DESC LIMIT $4
+        WHERE exchange = $1 AND instrument_name = $2 AND resolution = '1m'
+        ORDER BY tick DESC LIMIT $3
         """
         try:
-            records = await self._db.fetch(query, exchange.lower(), symbol.upper(), self.BASE_RESOLUTION, limit)
-            # Reverse to return chronological order (oldest -> newest) for TA
+            records = await self._db.fetch(query, exchange, symbol, limit)
+            # Sort ASC for calculation (oldest first)
             return [dict(r) for r in reversed(records)]
         except Exception as e:
-            log.error(f"Postgres fetch failed for {symbol}: {e}")
+            log.warning(f"Postgres fetch failed for {symbol}: {e}")
             return []
-
+        
     async def _fetch_from_redis(self, exchange: str, symbol: str, limit: int) -> list[dict]:
         # FIXED: Match Distributor's LPUSH List architecture
         key = f"market:buffer:ohlc:{exchange.lower()}:{symbol.upper()}"
