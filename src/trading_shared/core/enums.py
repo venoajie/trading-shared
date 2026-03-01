@@ -78,3 +78,13 @@ MOVER_EVENT_MAP = {
     "RISE_AGAIN": {"desc": "Rebounding", "weight": 5},
     "DROP_BACK": {"desc": "Pullback", "weight": -5},
 }
+
+
+class MarketRegime(Enum):
+    BULLISH = "BULLISH"
+    SEMI_BULLISH = "BULLISH"
+    NEUTRAL = "NEUTRAL"
+    SEMI_BEARISH = "BEARISH"
+    BEARISH = "BEARISH"
+    CRASH = "CRASH"
+

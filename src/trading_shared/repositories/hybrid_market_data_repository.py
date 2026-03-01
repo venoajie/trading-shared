@@ -35,7 +35,7 @@ class HybridMarketDataRepository:
 
     async def _fetch_from_postgres(self, exchange: str, symbol: str, limit: int) -> list[dict]:
         """Fetches from PostgreSQL for assets with persistent storage."""
-        # FIX: Change resolution = '1' to resolution = '1m' to match the Distributor's write format
+        # '1m'= to match the Distributor's write format
         query = """
         SELECT
             exchange, instrument_name, resolution,
